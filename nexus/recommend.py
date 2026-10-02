@@ -35,8 +35,8 @@ RULES = [
      f"The next 14 days are forecast at least {PLAN_CHANGE:.0%} above or below the same "
      "14 days a year earlier."),
     ("R5", "Caution", "Less reliable forecast",
-     f"On 2017 the forecast missed by more than {FORECAST_MAX_ERROR:.0%} of a typical day, "
-     "or did worse than the simple rule."),
+     f"In the test year the forecast missed by more than {FORECAST_MAX_ERROR:.0%} of a typical "
+     "day, or did worse than the simple rule."),
 ]
 
 
@@ -48,9 +48,9 @@ def _out_of_hours_share(start, end, working):
     return float(off.to_numpy().mean())
 
 
-def from_events(events):
+def from_events(events, calendar=None):
     """R1 and R2, from Resource Intelligence events."""
-    cal = pd.read_parquet(OUT / "calendar.parquet")
+    cal = pd.read_parquet(OUT / "calendar.parquet") if calendar is None else calendar
     working = dict(zip(cal["date"], cal["working_day"]))
     recs = []
 
@@ -92,6 +92,8 @@ def from_events(events):
 def from_occupancy(summary):
     """R3, from Institutional Intelligence."""
     recs = []
+    if summary is None or summary.empty:
+        return recs
     ok = summary[(summary["energy_note"] == "") & (summary["quiet_vs_busy"] >= QUIET_RATIO)]
     for r in ok.sort_values("quiet_vs_busy", ascending=False).itertuples():
         recs.append({
@@ -112,7 +114,8 @@ def from_forecasts(evaluation, daily, types, forecast):
     for r in evaluation[evaluation["note"] == ""].itertuples():
         if r.error_pct > FORECAST_MAX_ERROR or r.skill < 0:
             why = (f"misses by {r.error_pct:.1%} of a typical day" if r.error_pct > FORECAST_MAX_ERROR
-                   else f"was {abs(r.skill):.0%} less accurate than the simple rule on 2017")
+                   else f"was {abs(r.skill):.0%} less accurate than the simple rule on "
+                        f"{r.test_period}")
             recs.append({
                 "rule": "R5", "building": r.building, "size": r.error_pct,
                 "finding": f"The forecast {why}.",
@@ -150,9 +153,9 @@ def from_forecasts(evaluation, daily, types, forecast):
     return recs
 
 
-def build(events, summary, evaluation, daily, types, forecast):
+def build(events, summary, evaluation, daily, types, forecast, calendar=None):
     """All recommendations, grouped by rule and largest first within each rule."""
-    recs = from_events(events) + from_occupancy(summary) + \
+    recs = from_events(events, calendar) + from_occupancy(summary) + \
         from_forecasts(evaluation, daily, types, forecast)
     if not recs:
         return pd.DataFrame(columns=["rule", "kind", "title", "building", "finding",

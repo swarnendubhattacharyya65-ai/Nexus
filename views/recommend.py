@@ -2,22 +2,14 @@
 import pandas as pd
 import streamlit as st
 
-from nexus.predictive import forecast
-from nexus.recommend import RULES, build
-from views import institutional, predictive
+from nexus.recommend import RULES
+from views import common
 
 KINDS = ["Investigate", "Check data", "Plan", "Caution"]
 
 
-@st.cache_data(show_spinner="Applying recommendation rules ...")
-def _recs(events):
-    _, summary = institutional._data()
-    daily, types, evaluation = predictive._data()
-    return build(events, summary, evaluation, daily, types, forecast)
-
-
-def show(events):
-    recs = _recs(events)
+def show():
+    recs = common.recommendations()
     st.warning("**These are things to check, not diagnosed causes.** The data shows what was "
                "measured; only people on site can confirm why.")
 

@@ -24,11 +24,18 @@ def window(week_end):
     return end - WEEK, end
 
 
-def default_week_end():
-    """The latest date with both energy and Wi-Fi data."""
-    e = pd.read_parquet(OUT / "energy_hourly.parquet", columns=["hour", "kwh"]).dropna()
-    o = pd.read_parquet(OUT / "occupancy_hourly.parquet", columns=["hour", "occ_mean"]).dropna()
-    return min(e["hour"].max(), o["hour"].max()).normalize()
+def default_week_end(ds=None):
+    """The latest date with energy data, and Wi-Fi data too when the college has it."""
+    if ds is None:
+        e = pd.read_parquet(OUT / "energy_hourly.parquet", columns=["hour", "kwh"]).dropna()
+        o = pd.read_parquet(OUT / "occupancy_hourly.parquet", columns=["hour", "occ_mean"]).dropna()
+    else:
+        e = ds.energy.dropna(subset=["kwh"])
+        o = ds.occupancy.dropna(subset=["occ_mean"]) if ds.occupancy is not None else None
+    last = e["hour"].max()
+    if o is not None and len(o):
+        last = min(last, o["hour"].max())
+    return last.normalize()
 
 
 def _matched(df, value, week_end):
@@ -70,7 +77,7 @@ def daily(df, value, week_end, how="mean"):
     return s.reindex(pd.date_range(end - pd.Timedelta(days=SPARK_DAYS), periods=SPARK_DAYS))
 
 
-def snapshot(df, events, occ, week_end):
+def snapshot(df, events, occ, week_end, ds=None):
     """Everything the Overview cards and headline need, from the app's own tables.
 
     df:     hourly energy with baseline flags (nexus.resource.add_baseline)
@@ -78,9 +85,13 @@ def snapshot(df, events, occ, week_end):
     occ:    hourly occupancy (nexus.institutional.load_occupancy or the processed table)
     """
     start, end = window(week_end)
-    energy = df[~df["building"].isin(ENERGY_WARNINGS)][["hour", "building", "kwh"]]
-    full = pd.read_parquet(OUT / "energy_hourly.parquet")
-    full = full[~full["building"].isin(ENERGY_WARNINGS)]
+    if occ is None:   # a college without Wi-Fi or occupancy data
+        occ = pd.DataFrame({"hour": pd.Series(dtype="datetime64[ns]"),
+                            "building": pd.Series(dtype=object), "occ_mean": pd.Series(dtype=float)})
+    unreliable = ENERGY_WARNINGS if ds is None else ds.warnings
+    energy = df[~df["building"].isin(unreliable)][["hour", "building", "kwh"]]
+    full = pd.read_parquet(OUT / "energy_hourly.parquet") if ds is None else ds.energy
+    full = full[~full["building"].isin(unreliable)]
     # Only hours while each meter was in service count as gaps (some started later).
     span = full.dropna(subset=["kwh"]).groupby("building")["hour"].agg(["min", "max"])
     full = full.join(span, on="building")

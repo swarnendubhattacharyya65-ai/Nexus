@@ -22,7 +22,7 @@ if not (OUT / "energy_hourly.parquet").exists():
     st.stop()
 
 from views import (campus_map, common, institutional, overview, predictive,  # noqa: E402
-                   recommend, resource)
+                   recommend, resource, upload)
 from nexus.predictive import HORIZON  # noqa: E402
 
 
@@ -30,7 +30,7 @@ from nexus.predictive import HORIZON  # noqa: E402
 
 def overview_page():
     df, events = common.load()
-    overview.show(df, events, common.week(st.session_state["week_end"]))
+    overview.show(df, events, common.week(shell.week_end()))
 
 
 def resource_page():
@@ -60,7 +60,7 @@ def recommendations_page():
     shell.page_header("Recommendations",
                       "Each suggestion comes from an explicit rule applied to the findings on "
                       "the other pages, and shows the numbers behind it.")
-    recommend.show(common.load()[1])
+    recommend.show()
 
 
 def campus_page():
@@ -68,11 +68,15 @@ def campus_page():
                       "IIIT-Delhi's real buildings in 3D, coloured by what NEXUS found in the "
                       "week chosen at the top. Switch layers on the map; drag to rotate, pinch "
                       "to zoom.")
+    if not common.dataset().has_map:
+        st.info("The 3D map is available for IIIT-Delhi. An uploaded college would also need "
+                "its building outlines; switch College at the top to IIIT-Delhi to see the map.")
+        return
     if not campus_map.outlines_ready():
         st.info("Building outlines are not downloaded yet. In the codespace, run "
                 "`python scripts/fetch_campus.py`, then commit the `data/campus` folder.")
         return
-    week_end = pd.Timestamp(st.session_state["week_end"])
+    week_end = pd.Timestamp(shell.week_end())
     df, _ = common.load()
     status = campus_map.week_status(week_end, df, common.occupancy())
     buildings, outline = campus_map.load_outlines()
@@ -84,7 +88,26 @@ def campus_page():
 
 
 def data_page():
-    st.markdown(Path("DATA.md").read_text())
+    ds = common.dataset()
+    if ds.name == common.IIITD:
+        st.markdown(Path("DATA.md").read_text())
+        return
+    shell.page_header("Data & method", ds.source)
+    if ds.name == upload.SAMPLE_NAME:
+        st.markdown(Path("data/samples/README.md").read_text())
+    for note in ds.notes:
+        st.info(note)
+    st.subheader("Import checks")
+    upload.report_view(common.uploads()[ds.name]["report"])
+    st.markdown("The analyses use the same methods as for IIIT-Delhi; see the README and "
+                "the IIIT-Delhi Data & method page for details.")
+
+
+def upload_page():
+    shell.page_header("Add college data",
+                      "Run the same analyses on another college: upload its meter readings, "
+                      "see every check, then use every page with that college selected.")
+    upload.show()
 
 
 PAGES = {
@@ -101,13 +124,15 @@ PAGES = {
     "campus": st.Page(campus_page, title="Campus Map", icon=":material/map:", url_path="campus"),
     "data": st.Page(data_page, title="Data & method", icon=":material/description:",
                     url_path="data"),
+    "upload": st.Page(upload_page, title="Add college data", icon=":material/upload_file:",
+                      url_path="add-college"),
 }
 
 page = st.navigation({
     "Intelligence": [PAGES[k] for k in ["overview", "resource", "institutional", "predictive",
                                         "recommendations"]],
     "Campus": [PAGES["campus"]],
-    "About the data": [PAGES["data"]],
+    "Data": [PAGES["upload"], PAGES["data"]],
 })
 
 # A search result was picked: go to its page (state was set by the button callback).
@@ -116,7 +141,7 @@ if goto:
     st.switch_page(PAGES[goto])
 
 with st.sidebar:
-    st.caption("Data: I-BLEND, IIIT-Delhi (CC0). Public demo data, not PES data.")
+    st.caption("Demo data: I-BLEND, IIIT-Delhi (CC0). Public data, not PES data.")
 
 shell.top_bar()
 page.run()

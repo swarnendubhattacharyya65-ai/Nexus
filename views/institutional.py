@@ -3,21 +3,20 @@ import altair as alt
 import streamlit as st
 
 from nexus.institutional import (BUSY, BUSY_LEVEL, DAYS, MIN_HOURS, MIN_QUIET_SHARE, QUIET,
-                                 building_summary, load_occupancy, weekly_profile)
+                                 weekly_profile)
+from views import common
 from views.common import ACTUAL as BLUE
 
 # One-hue ramp for the heatmap; the quiet end fades into the navy page.
 RAMP = ["#0d366b", "#1c5cab", "#3987e5", "#86b6ef", "#cde2fb"]
 
 
-@st.cache_data(show_spinner="Reading occupancy ...")
-def _data():
-    occ = load_occupancy()
-    return occ, building_summary(occ)
-
-
 def show():
-    occ, summary = _data()
+    occ, summary = common.institutional()
+    if occ is None:
+        st.info("This college's data has no people or Wi-Fi counts, so occupancy patterns "
+                "cannot be shown. Add a people column to the upload to use this page.")
+        return
 
     # ------------------------------------------------------------ findings
     st.subheader("Findings")
@@ -63,7 +62,8 @@ def show():
                      alt.Tooltip("hours:Q", title="Hours of data")],
         ).properties(height=260)
         st.altair_chart(heat, width="stretch")
-        st.caption("Median estimated people for each hour of the week, 2014-2017.")
+        st.caption(f"Median estimated people for each hour of the week, "
+                   f"{occ['hour'].min():%Y}-{occ['hour'].max():%Y}.")
 
     # ------------------------------------------------- energy when quiet
     st.subheader("Energy when near-empty")

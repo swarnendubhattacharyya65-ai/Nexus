@@ -1,9 +1,16 @@
-"""Shared by every page: cached data loads, colours and small display helpers."""
+"""Shared by every page: the selected college, its analyses (computed once), colours, helpers.
+
+IIIT-Delhi's results are cached for everyone. An uploaded college's results are kept only
+in that visitor's session, so one visitor's data never reaches another.
+"""
 import pandas as pd
 import streamlit as st
 
-from nexus.kpis import snapshot
-from nexus.data import OUT
+from nexus.dataset import IIITD, iiitd
+from nexus.institutional import building_summary, load_occupancy
+from nexus.kpis import default_week_end, snapshot
+from nexus.predictive import backtest, daily_energy, day_types, evaluate, forecast
+from nexus.recommend import build
 from nexus.resource import add_baseline, find_events, load_energy
 
 # Chart colours, stepped for the navy page (validated: contrast >= 3:1, colour-blind safe pair).
@@ -13,23 +20,109 @@ NEUTRAL = "#8b94a8"    # baselines, expected values, rules
 UNUSUAL = "#ec835a"    # shading for flagged hours only
 
 
-@st.cache_data(show_spinner="Calculating baselines ...")
-def load():
-    """Hourly energy with baselines and flags, plus the unusual events found in it."""
-    df = add_baseline(load_energy())
+# ------------------------------------------------------------- which college
+
+def uploads():
+    return st.session_state.setdefault("uploads", {})
+
+
+def colleges():
+    return [IIITD, *uploads()]
+
+
+def college():
+    name = st.session_state.get("college", IIITD)
+    return name if name in colleges() else IIITD
+
+
+@st.cache_resource(show_spinner=False)
+def _iiitd():
+    return iiitd()
+
+
+def dataset():
+    name = college()
+    return _iiitd() if name == IIITD else uploads()[name]["dataset"]
+
+
+@st.cache_resource(show_spinner="Running the analysis ...")
+def _shared(kind, _fn):
+    return _fn(_iiitd())
+
+
+def compute(kind, fn, spinner="Working ..."):
+    """fn(dataset) for the selected college, computed once. Results are shared: don't modify them."""
+    name = college()
+    if name == IIITD:
+        return _shared(kind, fn)
+    memo = uploads()[name].setdefault("memo", {})
+    if kind not in memo:
+        with st.spinner(spinner):
+            memo[kind] = fn(dataset())
+    return memo[kind]
+
+
+# ------------------------------------------------------------- the analyses
+
+def _energy(ds):
+    df = add_baseline(load_energy(ds), ds.warnings)
     return df, find_events(df)
 
 
-@st.cache_data(show_spinner=False)
+def load():
+    """Hourly energy with baselines and flags, plus the unusual events found in it."""
+    return compute("energy", _energy, "Calculating baselines ...")
+
+
 def occupancy():
-    return pd.read_parquet(OUT / "occupancy_hourly.parquet")
+    return dataset().occupancy
 
 
-@st.cache_data(show_spinner="Comparing the week ...")
+def _institutional(ds):
+    if ds.occupancy is None or ds.occupancy.empty:
+        return None, pd.DataFrame()
+    occ = load_occupancy(ds)
+    return occ, building_summary(occ, ds)
+
+
+def institutional():
+    """(hourly occupancy with calendar, per-building summary); (None, empty) without occupancy."""
+    return compute("institutional", _institutional, "Reading occupancy ...")
+
+
+def _predictive(ds):
+    daily, types = daily_energy(ds), day_types(ds)
+    return daily, types, evaluate(backtest(daily, types))
+
+
+def predictive():
+    return compute("predictive", _predictive, "Testing forecasts on past data ...")
+
+
+def _recommendations(ds):
+    _, events = load()
+    _, summary = institutional()
+    daily, types, evaluation = predictive()
+    return build(events, summary, evaluation, daily, types, forecast, ds.calendar)
+
+
+def recommendations():
+    return compute("recommendations", _recommendations, "Applying recommendation rules ...")
+
+
 def week(week_end):
+    week_end = pd.Timestamp(week_end)
     df, events = load()
-    return snapshot(df, events, occupancy(), pd.Timestamp(week_end))
+    return compute(f"week {week_end:%Y-%m-%d}",
+                   lambda ds: snapshot(df, events, ds.occupancy, week_end, ds),
+                   "Comparing the week ...")
 
+
+def last_full_day():
+    return compute("last day", default_week_end)
+
+
+# ------------------------------------------------------------- display helpers
 
 def events_table(ev):
     """Events as a readable table: one row per event."""

@@ -1,0 +1,9 @@
+building_id,nexus_name,site_id,primaryspaceusage,sub_primaryspaceusage,sqm,yearbuilt,timezone
+Fox_education_Wendell,Education Wendell,Fox,Education,College Laboratory,20402.2,1992.0,US/Mountain
+Fox_education_Yolande,Education Yolande,Fox,Education,College Laboratory,16681.6,2006.0,US/Mountain
+Fox_education_Gloria,Education Gloria,Fox,Education,College Laboratory,14087.5,1983.0,US/Mountain
+Fox_lodging_Alana,Dormitory Alana,Fox,Lodging/residential,Dormitory,6938.2,2006.0,US/Mountain
+Fox_lodging_Jina,Dormitory Jina,Fox,Lodging/residential,Dormitory,9888.6,1963.0,US/Mountain
+Fox_food_Francesco,Dining Francesco,Fox,Food sales and service,Restaurant,2310.2,2012.0,US/Mountain
+Fox_office_Joy,Office Joy,Fox,Office,Office,6581.0,2014.0,US/Mountain
+Fox_assembly_Carlos,Fitness Center Carlos,Fox,Entertainment/public assembly,Fitness Center,6706.9,2013.0,US/Mountain

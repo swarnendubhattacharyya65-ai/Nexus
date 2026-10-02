@@ -17,7 +17,9 @@ visit can take a minute to wake up).
 | Institutional Intelligence | When are buildings busy or near-empty, and do they still use energy when near-empty? | Wi-Fi occupancy estimates by hour and weekday |
 | Predictive Intelligence | How much energy will each building use over the next 14 days? | Two simple forecasts, tested on history |
 | Recommendations | What should someone check next? | Explicit rules applied to the findings above |
-| Data & method | Where the data comes from and every cleaning decision | Shows `DATA.md` |
+| Campus Map | Where on campus is something happening this week? | Real building outlines in 3D, coloured by the week's findings |
+| Add college data | Does this work on another college? | Upload a CSV (or load the public sample); every page then runs on it |
+| Data & method | Where the data comes from and every cleaning decision | Shows `DATA.md`, or the import checks for an uploaded college |
 
 Every number is calculated by the code in `nexus/`, not typed in. Where there is not
 enough data, the app says "Insufficient data" instead of guessing. Recommendations are
@@ -102,13 +104,23 @@ All thresholds are named constants at the top of each file in `nexus/`.
 - **Forecast (Predictive):** daily kWh, 14 days ahead. Method 1, "same weekday last
   week". Method 2, the median of recent days of the same calendar day type. Forecasts
   were made every 7 days through the history using only data available at the time.
-  Each building's method was chosen on 2014-2016 and then scored on 2017. The 80%
-  range comes from past forecast errors.
+  Each building's method was chosen on the earlier years (late 2013 to 2016 for
+  IIIT-Delhi) and then scored on the last year (2017), which was not used to choose it.
+  The 80% range comes from past forecast errors.
 - **Week cards (Overview):** the 7 days ending on the chosen date vs the 7 days before,
   hour for hour, counting only building-hours recorded in both weeks. Fewer than 50%
   comparable hours gives "Insufficient data".
 - **Recommendations:** five explicit rules (R1-R5), each shown in the app with its
   threshold, the finding that triggered it and the evidence.
+
+## Other colleges
+`Add college data` takes one CSV of meter readings (`timestamp`, `building`, and one of
+`kwh`, `kw` or `w`; optional `people`) and an optional calendar. `nexus/importer.py`
+checks every row, turns readings into hourly kWh with the same 75% rule, and reports what
+it set aside and why. Uploads stay in the browser session and are never saved.
+
+A public sample is included: 8 buildings from site Fox of the Building Data Genome
+Project 2 (a US university campus, 2016-2017, CC BY-SA 4.0); see `data/samples/README.md`.
 
 ## Data
 I-BLEND, IIIT-Delhi. Rashid, H., Singh, P. & Singh, A. (2019). *Scientific Data* 6,

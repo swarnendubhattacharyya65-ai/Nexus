@@ -1,21 +1,19 @@
-"""Predictive Intelligence tab: 14-day daily energy forecasts, tested on 2017."""
+"""Predictive Intelligence page: 14-day daily energy forecasts, tested on the last year of data."""
 import altair as alt
 import pandas as pd
 import streamlit as st
 
-from nexus.predictive import (BAND, HORIZON, METHODS, TEST_FROM, WARM_UP, backtest,
-                              daily_energy, day_types, evaluate, forecast)
+from nexus.predictive import BAND, HORIZON, METHODS, WARM_UP, forecast
+from views import common
 from views.common import ACTUAL, FORECAST, NEUTRAL
 
 
-@st.cache_data(show_spinner="Testing forecasts on past data ...")
-def _data():
-    daily, types = daily_energy(), day_types()
-    return daily, types, evaluate(backtest(daily, types))
-
-
 def show():
-    daily, types, ev = _data()
+    daily, types, ev = common.predictive()
+    if ev.empty:
+        st.info("Insufficient data to test forecasts: no building has enough complete days.")
+        return
+    train, test = ev["train_period"].iloc[0], ev["test_period"].iloc[0]
 
     # -------------------------------------------------------------- controls
     usable = ev[ev["note"] == ""]
@@ -100,11 +98,11 @@ def show():
            "which is published in advance."
            if method == "calendar" else
            "Each day is forecast as the same weekday in the most recent week.")
-        + f" It was chosen because it was more accurate on 2014-2016. On 2017, which was "
+        + f" It was chosen because it was more accurate on {train}. On {test}, which was "
           f"not used to choose it, it missed by **{r['error_pct']:.0%}** of a typical day on "
           f"average, and **{r['band_coverage']:.0%}** of actual days fell inside the 80% range."
         + ("" if method == "naive" else
-           f" Compared with the simple rule on 2017, it was **{abs(r['skill']):.0%} "
+           f" Compared with the simple rule on {test}, it was **{abs(r['skill']):.0%} "
            f"{'more' if r['skill'] >= 0 else 'less'} accurate**."))
 
     with st.expander("Day by day"):
@@ -125,13 +123,13 @@ def show():
     worse = ", ".join(f"{b} {s:+.0%}" for b, s in zip(cal["building"], cal["skill"]) if s <= 0)
     st.markdown(
         "Tested by forecasting every 7 days through the history, using only data available "
-        f"at the time. Each building's method was chosen on 2014-2016, then scored on "
-        f"{TEST_FROM:%Y}, which was not used to choose it.\n\n"
+        f"at the time. Each building's method was chosen on {train}, then scored on "
+        f"{test}, which was not used to choose it.\n\n"
         f"- The calendar method was chosen for **{len(cal)} of {len(usable)}** buildings"
         + ("; the others use the simple 'same weekday last week' rule.\n"
            if len(cal) < len(usable) else ".\n")
-        + f"- On {TEST_FROM:%Y} it beat the simple rule in: **{better or 'none'}**.\n"
-        + (f"- On {TEST_FROM:%Y} it did not beat the simple rule in: **{worse}**. NEXUS reports "
+        + f"- On {test} it beat the simple rule in: **{better or 'none'}**.\n"
+        + (f"- On {test} it did not beat the simple rule in: **{worse}**. NEXUS reports "
            "this rather than switch methods after seeing the test year.\n" if worse else ""))
     st.dataframe(pd.DataFrame({
         "Building": usable["building"],
@@ -148,8 +146,8 @@ def show():
 
     st.warning(
         "**Limits.** Forecasts are statistical patterns, not guarantees. They cannot foresee "
-        "events, equipment faults or unusual weather (the dataset has no weather), and they "
+        "events, equipment faults or unusual weather (the data has no weather), and they "
         "rely on the institute calendar being known in advance. Days without complete meter "
         f"data are skipped. The 80% range comes from the {BAND[0]:.0%}-{BAND[1]:.0%} spread of "
-        "past forecast errors. Data covers 2013-2017, so forecasts are shown for past dates "
-        "where the actual outcome is known.")
+        f"past forecast errors. Data covers {daily['date'].min():%Y}-{daily['date'].max():%Y}, "
+        "so forecasts are shown for past dates where the actual outcome is known.")

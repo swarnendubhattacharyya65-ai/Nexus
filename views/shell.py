@@ -4,11 +4,9 @@ import html
 import pandas as pd
 import streamlit as st
 
-from nexus.kpis import default_week_end
-from views.common import load
+from nexus.dataset import IIITD
+from views import common
 from views.resource import event_ids
-
-COLLEGES = ["IIIT-Delhi, New Delhi"]
 
 CSS = """
 <style>
@@ -75,8 +73,13 @@ def style():
     st.html(CSS)
 
 
-def notice():
-    st.html('<div class="nx-notice"><span>Public IIIT-Delhi data. <b>Not PES data.</b></span></div>')
+def notice(ds):
+    """Where the data on screen comes from, always visible."""
+    if ds.name == IIITD:
+        text = "Public IIIT-Delhi data. <b>Not PES data.</b>"
+    else:
+        text = f"{html.escape(ds.source)} <b>Not PES data.</b>"
+    st.html(f'<div class="nx-notice"><span>{text}</span></div>')
 
 
 def page_header(title, description):
@@ -86,27 +89,52 @@ def page_header(title, description):
 
 # ------------------------------------------------------------------ top bar
 
-@st.cache_data(show_spinner=False)
-def _last_full_day():
-    return default_week_end()
+# Widgets whose options depend on the college; cleared when the college changes.
+PER_COLLEGE = ["res_building", "res_period", "res_direction", "res_event", "inst_building",
+               "inst_period", "pred_building", "pred_origin", "search"]
+
+
+def week_key():
+    """Each college keeps its own week, so switching college starts at that college's latest week."""
+    return f"week_end::{common.college()}"
+
+
+def week_end():
+    return st.session_state[week_key()]
+
+
+def _college_changed():
+    for key in PER_COLLEGE:
+        st.session_state.pop(key, None)
 
 
 def top_bar():
     """College, week and search controls shared by every page."""
-    last = _last_full_day().date()
-    df, _ = load()
-    first = (df["hour"].min() + pd.Timedelta(days=14)).date()
+    names = common.colleges()
+    if st.session_state.get("college") not in names:
+        st.session_state["college"] = names[0]
     c1, c2, c3, c4 = st.container(key="topbar").columns([1.5, 1.1, 2.2, 1.5],
                                                          vertical_alignment="bottom")
-    c1.selectbox("College", COLLEGES, key="college")
-    c2.date_input("Week ending", value=last, min_value=first, max_value=df["hour"].max().date(),
-                  key="week_end", format="DD/MM/YYYY",
+    c1.selectbox("College", names, key="college", on_change=_college_changed)
+
+    ds = common.dataset()
+    last = common.last_full_day().date()
+    first = (ds.first + pd.Timedelta(days=14)).date()
+    latest = ds.last.date()
+    key = week_key()
+    chosen = st.session_state.get(key)
+    if chosen is not None and not first <= chosen <= latest:
+        st.session_state.pop(key)
+    default = {} if key in st.session_state else {"value": last}
+    c2.date_input("Week ending", min_value=first, max_value=latest, key=key,
+                  format="DD/MM/YYYY", **default,
                   help="The Overview compares the 7 days ending on this date with the 7 days "
-                       "before. Defaults to the last date with both energy and Wi-Fi data.")
+                       "before. Defaults to the last date with energy data (and Wi-Fi data, "
+                       "where the college has it).")
     query = c3.text_input("Search", placeholder="A building, a date (2016-09) or a check",
                           key="search")
     with c4:
-        notice()
+        notice(ds)
     if query.strip():
         _results(query.strip())
 
@@ -120,9 +148,7 @@ def _go(page, state=None):
 
 
 def _results(query):
-    from views import recommend
-
-    df, events = load()
+    df, events = common.load()
     q = query.lower()
     hits = []
     for b in sorted(df.loc[df["flag"] != "unreliable meter", "building"].unique()):
@@ -138,7 +164,7 @@ def _results(query):
                      f"{e.expected_kwh:,.0f} expected", ":material/warning:", "resource",
                      {"res_building": e.building, "res_direction": "higher",
                       "res_period": whole, "res_event": eid}))
-    recs = recommend._recs(events)
+    recs = common.recommendations()
     rec_text = (recs["title"] + " " + recs["building"] + " " + recs["finding"] + " "
                 + recs["next_step"]).str.lower()
     for r in recs[rec_text.str.contains(q, regex=False)].head(4).itertuples():
