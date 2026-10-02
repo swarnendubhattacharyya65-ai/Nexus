@@ -12,6 +12,7 @@ import streamlit as st
 from nexus.data import ENERGY_WARNINGS, OUT
 from nexus.resource import MIN_CHANGE, Z_LIMIT, add_baseline, find_events, load_energy
 from views import institutional as institutional_view
+from views import predictive as predictive_view
 
 ACTUAL = "#2a78d6"    # the measured series
 EXPECTED = "#8c8b86"  # neutral grey for the baseline and its normal range
@@ -60,8 +61,9 @@ df, events = load()
 analysed = df[df["flag"] != "unreliable meter"]
 high_events = events[events["direction"] == "high"]
 
-overview, resource, inst_tab, method = st.tabs(
-    ["Overview", "Resource Intelligence", "Institutional Intelligence", "Data & method"])
+overview, resource, inst_tab, pred_tab, method = st.tabs(
+    ["Overview", "Resource Intelligence", "Institutional Intelligence",
+     "Predictive Intelligence", "Data & method"])
 
 # ---------------------------------------------------------------- overview
 
@@ -204,6 +206,9 @@ with resource:
 
 with inst_tab:
     institutional_view.show()
+
+with pred_tab:
+    predictive_view.show()
 
 with method:
     st.markdown(Path("DATA.md").read_text())
