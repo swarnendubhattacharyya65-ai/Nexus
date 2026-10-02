@@ -82,7 +82,9 @@ def campus_page():
     buildings, outline = campus_map.load_outlines()
     picked = campus_map.render(campus_map.payload(buildings, outline, status,
                                                   f"Week ending {week_end:%a %-d %b %Y}"))
-    campus_map.details(status, picked.picked if picked else None)
+    if picked and picked.picked:
+        st.session_state["campus_picked"] = picked.picked
+    campus_map.details(status, st.session_state.get("campus_picked"))
     campus_map.status_table(status)
     campus_map.matching_notes(status)
 

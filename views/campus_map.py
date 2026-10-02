@@ -221,6 +221,12 @@ CSS = """
 .nx-map-root .nx-legend div { display: flex; align-items: center; gap: 8px; margin: 3px 0; }
 .nx-map-root .nx-legend i { width: 12px; height: 12px; border-radius: 3px; flex: none; }
 .nx-map-root .nx-week { right: 12px; bottom: 34px; padding: 7px 11px; font-size: 12px; color: #b9c6e4; }
+.nx-map-root.nx-compact .nx-modes { flex-direction: row; flex-wrap: wrap; max-width: calc(100% - 70px); }
+.nx-map-root.nx-compact .nx-modes button { padding: 5px 8px; font-size: 12px; }
+.nx-map-root.nx-compact .nx-modes hr { display: none; }
+.nx-map-root.nx-compact .nx-legend { padding: 7px 9px; font-size: 11px; max-width: 200px; }
+.nx-map-root.nx-compact .nx-legend div:last-child { display: none; }
+.nx-map-root.nx-compact .nx-week { display: none; }
 .nx-pin { pointer-events: none; }
 .nx-tag { --c: #3987e5; --lift: 30px; position: relative; pointer-events: auto;
   margin-bottom: var(--lift); font: 600 12px "IBM Plex Sans", system-ui, sans-serif; color: #f2f6ff;
@@ -287,6 +293,7 @@ export default function (component) {
   const { data, parentElement, setTriggerValue } = component;
   const root = parentElement.querySelector(".nx-map-root");
   root.style.height = data.height + "px";
+  root.classList.toggle("nx-compact", data.height < 560);
   const state = root.__nx || (root.__nx = { layer: data.layer, satellite: false, markers: [] });
   state.data = data;
   root.querySelector(".nx-week").textContent = data.week;
@@ -338,8 +345,12 @@ function build(maplibregl, root, state, setTriggerValue) {
     state.pick = setTriggerValue;
     if (state.data.bounds) {
       // Frame the metered buildings; looking west puts the campus's long north-south axis across the screen.
-      map.fitBounds(state.data.bounds, { padding: { top: 90, bottom: 70, left: 190, right: 70 },
-                                         bearing: -78, pitch: 55, duration: 0, maxZoom: 17.2 });
+      const box = root.getBoundingClientRect(), compact = state.data.height < 560;
+      map.fitBounds(state.data.bounds, {
+        padding: { top: Math.round(box.height * (compact ? 0.3 : 0.2)), bottom: Math.round(box.height * 0.14),
+                   left: Math.round(compact ? box.width * 0.16 : 190),
+                   right: Math.round(box.width * (compact ? 0.16 : 0.08)) },
+        bearing: -78, pitch: 55, duration: 0, maxZoom: 17.2 });
     }
     paint(state);
     if (!still) {

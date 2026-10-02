@@ -5,10 +5,11 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
-from nexus.kpis import HOURS_PER_WEEK, headline
+from nexus import insights
+from nexus.kpis import HOURS_PER_WEEK, headline, window
 from nexus.recommend import EXTREME, PLAN_CHANGE
-from views import common
-from views.common import ACTUAL as BLUE
+from views import campus_map, common
+from views.common import ACTUAL as BLUE, FORECAST as FORECAST_C, UNUSUAL
 
 
 def _bullets(lines):
@@ -91,6 +92,141 @@ def _cards(snap, ds):
                        "only while each meter was in service). Gaps hide "
                        "real use, so a rising share is a meter or data-feed problem to check.")
 
+ICONS = {"high": "warning", "data": "power_off", "plan": "trending_up", "pattern": "schedule",
+         "caution": "info"}   # Material Symbols names (the font Streamlit already loads)
+KIND_COLOR = {"high": "#ec835a", "data": "#8b94a8", "plan": "#9085e9", "pattern": "#fab219",
+              "caution": "#8ab4ff"}
+HOURS_COLORS = {"Busy": "#86b6ef", "In use": "#3987e5", "Near-empty": "#1c5cab",
+                "Normal": "#3987e5", "Higher than usual": "#ec835a", "Lower than usual": "#9085e9",
+                "No data": "#3a4560"}
+
+
+def _feed_html(items):
+    if not items:
+        return '<p class="nx-empty">Nothing stood out this week.</p>'
+    rows = []
+    for it in items:
+        color = KIND_COLOR[it["kind"]]
+        rows.append(
+            f'<li><span class="nx-ico" style="color:{color};border-color:{color}55" '
+            f'aria-hidden="true">{ICONS[it["kind"]]}</span>'
+            f'<div><div class="nx-row"><b style="color:{color}">{html.escape(it["title"])}</b>'
+            f'<time>{html.escape(it["when"])}</time></div>'
+            f'<p>{html.escape(it["text"])}</p></div></li>')
+    return '<ul class="nx-feed">' + "".join(rows) + "</ul>"
+
+
+def _map_and_feed(df, events, recs, ds, week_end, forecast_change):
+    items = insights.feed(events, df, recs, week_end, forecast_change)
+    if ds.has_map and campus_map.outlines_ready():
+        left, right = st.container(key="mapfeed").columns([1.7, 1], gap="medium")
+        with left:
+            st.subheader("Campus this week")
+            status = campus_map.week_status(pd.Timestamp(week_end), df, ds.occupancy)
+            buildings, outline = campus_map.load_outlines()
+            picked = campus_map.render(
+                campus_map.payload(buildings, outline, status, f"Week ending {week_end:%a %-d %b %Y}"),
+                height=540, key="overview_map")
+            if picked and picked.picked:   # a tapped building opens on the Campus Map page
+                st.session_state["campus_picked"] = picked.picked
+                st.session_state["_goto"] = "campus"
+                st.rerun()
+        box = right
+    else:
+        box = st.container()
+    with box:
+        st.subheader("Key insights")
+        st.html(_feed_html(items))
+        st.caption("This week's unusual events and meter gaps first, then patterns across the "
+                   "data. All in Recommendations and Resource Intelligence.")
+
+
+def _panels(df, events, ds, week_end, fc, skipped, change):
+    c1, c2, c3 = st.container(key="panels").columns(3, gap="medium")
+
+    with c1:
+        st.subheader("Electricity, 30 days")
+        trend = insights.daily_trend(df, week_end)
+        if trend.empty:
+            st.info("Insufficient data: no day in these 30 days has 90% of its hours recorded.")
+        else:
+            base = alt.Chart(trend).encode(x=alt.X("date:T", title=None, axis=alt.Axis(format="%-d %b", tickCount=4)))
+            line = base.mark_line(color=BLUE, strokeWidth=2).encode(
+                y=alt.Y("kwh:Q", title="kWh per day", scale=alt.Scale(zero=False), axis=alt.Axis(tickCount=4)))
+            dots = base.transform_filter("datum.high_hours > 0").mark_circle(
+                color=UNUSUAL, size=70, opacity=1, stroke="#0a1020", strokeWidth=2).encode(y="kwh:Q")
+            hover = base.mark_circle(size=220, opacity=0).encode(
+                y="kwh:Q", tooltip=[alt.Tooltip("date:T", title="Day", format="%a %-d %b %Y"),
+                                    alt.Tooltip("kwh:Q", title="kWh", format=",.0f"),
+                                    alt.Tooltip("high_hours:Q", title="Hours higher than usual")])
+            st.altair_chart((line + dots + hover).properties(height=210), width="stretch")
+            start, end = window(week_end)
+            month = events[(events["direction"] == "high") & (events["start"] >= end - pd.Timedelta(days=30))
+                           & (events["start"] < end)]
+            note = ("Orange: days with hours higher than usual."
+                    + (f" Largest: {month.iloc[0]['building']}, {month.iloc[0]['extra_pct']:+.0%} on "
+                       f"{month.iloc[0]['start']:%a %-d %b}." if not month.empty else ""))
+            st.caption(note + " Days missing over 10% of building-hours are left out.")
+
+    with c2:
+        wifi = insights.building_hours(ds.occupancy, week_end)
+        use_wifi = wifi is not None and wifi.loc[wifi["state"] != "No data", "hours"].sum() > 0
+        hours = wifi if use_wifi else insights.energy_hours(df, week_end)
+        st.subheader("Building hours, this week" if use_wifi else "Energy hours, this week")
+        total = int(hours["hours"].sum())
+        hours = hours.assign(share=hours["hours"] / max(total, 1))
+        order = list(hours["state"])
+        donut = alt.Chart(hours).mark_arc(innerRadius=62, outerRadius=92, stroke="#0a1020", strokeWidth=2).encode(
+            theta=alt.Theta("hours:Q", stack=True),
+            order=alt.Order("order:Q"),
+            color=alt.Color("state:N", scale=alt.Scale(domain=order, range=[HOURS_COLORS[s] for s in order]),
+                            legend=None),
+            tooltip=[alt.Tooltip("state:N", title="State"), alt.Tooltip("hours:Q", title="Building-hours"),
+                     alt.Tooltip("share:Q", title="Share", format=".0%")],
+        ).transform_calculate(order=f"indexof({order}, datum.state)")
+        centre = alt.Chart(pd.DataFrame({"t": [f"{total:,}"]})).mark_text(
+            font="Chakra Petch", fontSize=22, fontWeight=600, color="#f2f6ff", dy=-6).encode(text="t:N")
+        sub = alt.Chart(pd.DataFrame({"t": ["building-hours"]})).mark_text(
+            fontSize=11, color="#a3b0cc", dy=14).encode(text="t:N")
+        st.altair_chart((donut + centre + sub).properties(height=200), width="stretch")
+        st.html('<div class="nx-keys">' + "".join(
+            f'<div class="nx-key"><i style="background:{HOURS_COLORS[r.state]}"></i>{html.escape(r.state)}'
+            f'<b>{r.share:.0%}</b></div>' for r in hours.itertuples()) + "</div>")
+        st.caption("Busy: at least half the building's usual peak of people on Wi-Fi. Near-empty: "
+                   "under 10%. No room capacities exist in this data, so these are not room-use rates."
+                   if use_wifi else
+                   "Each building-hour this week by its energy flag (see Resource Intelligence). "
+                   "No Wi-Fi data for this week.")
+
+    with c3:
+        st.subheader("Next 14 days")
+        if fc.empty:
+            st.info("Insufficient data to forecast from this date.")
+        else:
+            long = fc.melt("date", ["forecast", "actual"], var_name="series", value_name="kwh").dropna()
+            long["series"] = long["series"].map({"forecast": "Forecast", "actual": "Actual"})
+            names = ["Actual", "Forecast"]
+            chart = alt.Chart(long).mark_line(strokeWidth=2, point=alt.OverlayMarkDef(size=28)).encode(
+                x=alt.X("date:T", title=None, axis=alt.Axis(format="%-d %b", tickCount=4)),
+                y=alt.Y("kwh:Q", title="kWh per day", scale=alt.Scale(zero=False), axis=alt.Axis(tickCount=4)),
+                color=alt.Color("series:N", scale=alt.Scale(domain=names, range=[BLUE, FORECAST_C]),
+                                legend=alt.Legend(orient="top", title=None)),
+                strokeDash=alt.StrokeDash("series:N", scale=alt.Scale(domain=names, range=[[1, 0], [4, 3]]),
+                                          legend=None),
+                tooltip=[alt.Tooltip("date:T", title="Day", format="%a %-d %b %Y"),
+                         alt.Tooltip("series:N", title=""), alt.Tooltip("kwh:Q", title="kWh", format=",.0f")])
+            st.altair_chart(chart.properties(height=210), width="stretch")
+            bits = []
+            if change is not None:
+                bits.append(f"Forecast {change:+.0%} vs the 14 days before.")
+            if fc["actual"].notna().any():
+                bits.append("Actual shown where the data has it.")
+            else:
+                bits.append("These days are after the end of the data, so there is no actual yet.")
+            if skipped:
+                bits.append(f"Not included: {', '.join(skipped)}.")
+            st.caption(" ".join(bits) + " Sum of each building's forecast; see Predictive Intelligence.")
+
 
 def show(df, events, snap):
     analysed = df[df["flag"] != "unreliable meter"]
@@ -104,6 +240,15 @@ def show(df, events, snap):
     _cards(snap, ds)
     for building, why in ds.warnings.items():
         st.warning(f"**{building} energy is not analysed.** {why}")
+
+    week_end = snap["week_end"]
+    daily, types, _ = common.predictive()
+    fc, skipped, change = common.compute(
+        f"campus forecast {week_end:%Y-%m-%d}",
+        lambda d: insights.campus_forecast(daily, types, evaluation, week_end))
+    _map_and_feed(df, events, recs, ds, week_end, change)
+    _panels(df, events, ds, week_end, fc, skipped, change)
+    st.subheader("Across all the data")
 
     # average energy per complete day, used below and for the biggest user
     per_day = (analysed.assign(day=analysed["hour"].dt.normalize())
@@ -174,14 +319,3 @@ def show(df, events, snap):
                  alt.Tooltip("kwh_per_day:Q", title="kWh per day", format=",.0f")],
     ).properties(height=alt.Step(36))  # 36 px per building, plus room for the axis
     st.altair_chart(bars, width="stretch")
-
-    st.subheader("Largest higher-than-usual events")
-    top = high.head(5)
-    st.dataframe(pd.DataFrame({
-        "Building": top["building"],
-        "Start": top["start"].dt.strftime("%Y-%m-%d %H:%M"),
-        "Hours": top["hours"],
-        "Actual kWh": top["actual_kwh"].round(),
-        "Expected kWh": top["expected_kwh"].round(),
-        "Extra %": (top["extra_pct"] * 100).round(),
-    }), hide_index=True)

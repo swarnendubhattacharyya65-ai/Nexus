@@ -55,6 +55,24 @@ CSS = """
 [data-testid="stMetricValue"] { font-family: "Chakra Petch", sans-serif; }
 [data-testid="stVerticalBlockBorderWrapper"] { background: rgba(17,26,46,0.45); }
 
+/* key insights feed and legends */
+.nx-feed { list-style: none; margin: 0; padding: 0; }
+.nx-feed li { display: grid; grid-template-columns: 32px 1fr; gap: 10px; align-items: start;
+  padding: 10px 2px; border-bottom: 1px solid rgba(127,178,255,0.1); }
+.nx-feed li:last-child { border-bottom: 0; }
+.nx-ico { width: 30px; height: 30px; border-radius: 8px; border: 1px solid; display: grid;
+  place-items: center; background: rgba(255,255,255,0.03);
+  font-family: "Material Symbols Rounded"; font-size: 18px; line-height: 1; overflow: hidden; }
+.nx-row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.nx-feed b { font-weight: 600; font-size: 0.95rem; }
+.nx-feed p { margin: 2px 0 0; color: #c9d4ee; font-size: 0.88rem; line-height: 1.4; }
+.nx-feed time { color: #8b94a8; font-size: 0.78rem; white-space: nowrap; }
+.nx-empty { color: #a3b0cc; }
+.nx-keys { display: flex; flex-wrap: wrap; gap: 4px 18px; }
+.nx-key { display: flex; align-items: center; gap: 8px; font-size: 0.88rem; color: #c9d4ee; padding: 2px 0; }
+.nx-key i { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.nx-key b { color: #f2f6ff; font-weight: 600; }
+
 /* narrow main area (portrait tablet, or sidebar open on a small screen) */
 [data-testid="stMainBlockContainer"] { container-type: inline-size; }
 @container (max-width: 760px) {
@@ -62,8 +80,12 @@ CSS = """
   .st-key-topbar [data-testid="stHorizontalBlock"] { flex-wrap: wrap; row-gap: 1rem; }
   .st-key-kpis [data-testid="stColumn"],
   .st-key-topbar [data-testid="stColumn"] { min-width: calc(50% - 0.5rem); }
-  .st-key-questions [data-testid="stHorizontalBlock"] { flex-wrap: wrap; row-gap: 0.5rem; }
-  .st-key-questions [data-testid="stColumn"] { min-width: 100%; }
+  .st-key-questions [data-testid="stHorizontalBlock"],
+  .st-key-mapfeed [data-testid="stHorizontalBlock"],
+  .st-key-panels [data-testid="stHorizontalBlock"] { flex-wrap: wrap; row-gap: 0.5rem; }
+  .st-key-questions [data-testid="stColumn"],
+  .st-key-mapfeed [data-testid="stColumn"],
+  .st-key-panels [data-testid="stColumn"] { min-width: 100%; }
 }
 </style>
 """
