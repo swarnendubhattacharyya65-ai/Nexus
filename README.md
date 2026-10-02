@@ -10,9 +10,9 @@ Live app: https://nexusdemo.streamlit.app (free hosting sleeps when idle, so the
 visit can take a minute to wake up).
 
 ## What it does
-| Tab | Question it answers | How |
+| Page | Question it answers | How |
 |---|---|---|
-| Overview | What is happening, what might happen next, what to check | Summary of the tabs below |
+| Overview | How did the chosen week compare with the week before? What is happening, what might happen next, what to check | Hour-for-hour week comparison, plus a summary of the pages below |
 | Resource Intelligence | Which hours used unusually more or less energy than normal? | Each hour vs a baseline of comparable hours |
 | Institutional Intelligence | When are buildings busy or near-empty, and do they still use energy when near-empty? | Wi-Fi occupancy estimates by hour and weekday |
 | Predictive Intelligence | How much energy will each building use over the next 14 days? | Two simple forecasts, tested on history |
@@ -66,18 +66,22 @@ python -m nexus.resource        # baselines and unusual events
 python -m nexus.institutional   # occupancy summary per building
 python -m nexus.predictive      # forecast backtest and accuracy on 2017
 python -m nexus.recommend       # every recommendation with its evidence
+python -m nexus.kpis 2016-09-14  # one week vs the week before
 ```
 
 ## Project structure
 ```
-app.py                   Streamlit app: header, tabs, Resource Intelligence tab
-views/                   The other tabs, one file each
+app.py                   Entry point: sidebar navigation, top bar, pages
+views/                   One file per page, plus shell.py (top bar, search) and common.py
 nexus/data.py            Raw files -> hourly tables in data/processed/, plus data checks
 nexus/resource.py        Baselines and unusual events
 nexus/institutional.py   Occupancy patterns and energy when near-empty
 nexus/predictive.py      Forecasts and backtest
 nexus/recommend.py       Recommendation rules R1-R5
-scripts/inspect_raw.py   Read-only raw data summary
+nexus/kpis.py            Week-on-week cards and the Overview headline
+scripts/                 Raw data summary, logo generator
+static/                  Logo and self-hosted fonts (SIL Open Font License)
+.streamlit/config.toml   Theme: colours, fonts
 DATA.md                  Source, license, files, cleaning decisions, limitations
 data/processed/          Committed hourly tables the app reads
 ```
@@ -100,6 +104,9 @@ All thresholds are named constants at the top of each file in `nexus/`.
   were made every 7 days through the history using only data available at the time.
   Each building's method was chosen on 2014-2016 and then scored on 2017. The 80%
   range comes from past forecast errors.
+- **Week cards (Overview):** the 7 days ending on the chosen date vs the 7 days before,
+  hour for hour, counting only building-hours recorded in both weeks. Fewer than 50%
+  comparable hours gives "Insufficient data".
 - **Recommendations:** five explicit rules (R1-R5), each shown in the app with its
   threshold, the finding that triggered it and the evidence.
 

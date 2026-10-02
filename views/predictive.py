@@ -5,10 +5,7 @@ import streamlit as st
 
 from nexus.predictive import (BAND, HORIZON, METHODS, TEST_FROM, WARM_UP, backtest,
                               daily_energy, day_types, evaluate, forecast)
-
-ACTUAL = "#2a78d6"
-FORECAST = "#eb6834"
-NEUTRAL = "#8c8b86"
+from views.common import ACTUAL, FORECAST, NEUTRAL
 
 
 @st.cache_data(show_spinner="Testing forecasts on past data ...")
@@ -19,10 +16,6 @@ def _data():
 
 def show():
     daily, types, ev = _data()
-    st.caption(f"Forecasts each building's daily energy {HORIZON} days ahead with two simple, "
-               "transparent methods, and shows how accurate they were on past data. "
-               "Pick any date to see what NEXUS would have forecast then, next to what "
-               "actually happened.")
 
     # -------------------------------------------------------------- controls
     usable = ev[ev["note"] == ""]

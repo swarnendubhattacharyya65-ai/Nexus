@@ -1,0 +1,66 @@
+# NEXUS look: deep navy control room, electric-blue accent.
+# Fonts are served from static/fonts (SIL Open Font License, see the .txt files there).
+
+[server]
+enableStaticServing = true
+
+[theme]
+base = "dark"
+primaryColor = "#4f8cff"
+backgroundColor = "#0a1020"
+secondaryBackgroundColor = "#141e36"
+textColor = "#e6ecfa"
+linkColor = "#8ab4ff"
+borderColor = "#22304f"
+dataframeBorderColor = "#1c2843"
+dataframeHeaderBackgroundColor = "#111a2e"
+showWidgetBorder = true
+baseRadius = "0.6rem"
+font = "IBM Plex Sans, sans-serif"
+headingFont = "Chakra Petch, sans-serif"
+headingFontWeights = [700, 600, 600]
+headingFontSizes = ["2.1rem", "1.6rem", "1.3rem", "1.1rem", "1rem", "0.9rem"]
+metricValueFontSize = "1.85rem"
+metricValueFontWeight = 600
+blueColor = "#4f8cff"
+greenColor = "#0ca30c"
+orangeColor = "#ec835a"
+yellowColor = "#fab219"
+redColor = "#d03b3b"
+violetColor = "#9085e9"
+chartCategoricalColors = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9", "#e66767"]
+
+[[theme.fontFaces]]
+family = "Chakra Petch"
+url = "app/static/fonts/chakra-petch-latin-500-normal.woff2"
+weight = 500
+
+[[theme.fontFaces]]
+family = "Chakra Petch"
+url = "app/static/fonts/chakra-petch-latin-600-normal.woff2"
+weight = 600
+
+[[theme.fontFaces]]
+family = "Chakra Petch"
+url = "app/static/fonts/chakra-petch-latin-700-normal.woff2"
+weight = 700
+
+[[theme.fontFaces]]
+family = "IBM Plex Sans"
+url = "app/static/fonts/ibm-plex-sans-latin-400-normal.woff2"
+weight = 400
+
+[[theme.fontFaces]]
+family = "IBM Plex Sans"
+url = "app/static/fonts/ibm-plex-sans-latin-500-normal.woff2"
+weight = 500
+
+[[theme.fontFaces]]
+family = "IBM Plex Sans"
+url = "app/static/fonts/ibm-plex-sans-latin-600-normal.woff2"
+weight = 600
+
+[theme.sidebar]
+backgroundColor = "#0c1528"
+secondaryBackgroundColor = "#16213b"
+borderColor = "#1c2843"

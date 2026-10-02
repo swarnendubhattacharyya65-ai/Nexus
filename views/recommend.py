@@ -18,8 +18,6 @@ def _recs(events):
 
 def show(events):
     recs = _recs(events)
-    st.caption("Each suggestion comes from an explicit rule applied to the findings in the "
-               "other tabs, and shows the numbers behind it.")
     st.warning("**These are things to check, not diagnosed causes.** The data shows what was "
                "measured; only people on site can confirm why.")
 

@@ -1,32 +1,96 @@
-"""Overview tab: what is happening, what might happen next, what to check."""
+"""Overview page: the chosen week at a glance, then what is happening, what next, what to check."""
+import html
+
 import altair as alt
 import pandas as pd
 import streamlit as st
 
 from nexus.data import ENERGY_WARNINGS
+from nexus.kpis import HOURS_PER_WEEK, headline
 from nexus.recommend import EXTREME, PLAN_CHANGE
 from views import institutional, predictive, recommend
-
-BLUE = "#2a78d6"
+from views.common import ACTUAL as BLUE
 
 
 def _bullets(lines):
     st.markdown("\n".join(f"- {line}" for line in lines) if lines else "- Insufficient data.")
 
 
-def show(df, events):
+def _hero(df, analysed, high, recs, snap):
+    h = headline(snap)
+    chips = [
+        f"<b>{analysed['building'].nunique()} of {df['building'].nunique()}</b> buildings analysed",
+        f"<b>{df['hour'].min():%b %Y}</b> to <b>{df['hour'].max():%b %Y}</b>",
+        f"<b>{len(high):,}</b> higher-than-usual events",
+        f"<b>{len(recs):,}</b> suggested checks",
+    ]
+    st.html(
+        '<div class="nx-hero">'
+        f'<p class="nx-when">{html.escape(h["when"])}, IIIT-Delhi campus</p>'
+        f'<h2>{html.escape(h["main"])}</h2>'
+        f'<p class="nx-details">{html.escape(" ".join(h["details"]))}</p>'
+        '<div class="nx-chips">' + "".join(f'<span class="nx-chip">{c}</span>' for c in chips)
+        + "</div></div>")
+
+
+def _spark(series):
+    """Sparkline values: days without data are left out rather than drawn as zero."""
+    values = series.dropna().round(2).tolist()
+    return values or None
+
+
+def _cards(snap):
+    """Four week-on-week cards, each with a 4-week sparkline."""
+    e, w = snap["energy"], snap["wifi"]
+    c1, c2, c3, c4 = st.container(key="kpis").columns(4)
+    if e["change"] is None:
+        c1.metric("Electricity", "Insufficient data", border=True,
+                  help=f"Only {e['coverage']:.0%} of building-hours were recorded in both weeks.")
+    else:
+        c1.metric("Electricity", f"{e['this']:,.0f} kWh", f"{e['change']:+.1%}",
+                  delta_color="inverse", delta_description="vs last week", border=True,
+                  chart_data=_spark(snap["energy_daily"]), chart_type="area",
+                  help="Hour-for-hour comparison with the 7 days before, using only "
+                       f"building-hours recorded in both weeks ({e['coverage']:.0%}). Lecture is "
+                       "excluded (unreliable meter). Sparkline: average kWh per building-hour, "
+                       "each day for 4 weeks.")
+    if w["change"] is None:
+        c2.metric("People on Wi-Fi", "No Wi-Fi data", border=True,
+                  help="Wi-Fi counts cover Feb 2014 to 3 Nov 2017. Pick a week inside that range.")
+    else:
+        c2.metric("People on Wi-Fi", f"{w['this'] / HOURS_PER_WEEK:,.0f} avg", f"{w['change']:+.0%}",
+                  delta_color="off", delta_description="vs last week", border=True,
+                  chart_data=_spark(snap["wifi_daily"]), chart_type="area",
+                  help="Estimated people connected across all buildings, averaged over the "
+                       "week's hours. Wi-Fi counts devices, not exact people. Compared hour for "
+                       f"hour with the week before ({w['coverage']:.0%} of building-hours "
+                       "comparable).")
+    diff = snap["events"] - snap["events_prev"]
+    c3.metric("Unusual events", f"{snap['events']}", f"{diff:+d}" if diff else "0",
+              delta_color="inverse", delta_description="vs last week", border=True,
+              chart_data=_spark(snap["events_daily"]), chart_type="bar",
+              help="Higher-than-usual events that started this week: hours in a row well above each "
+                   "building's baseline (see Resource Intelligence). Bars: flagged hours per day.")
+    if snap["missing"] is not None:
+        pts = (snap["missing"] - (snap["missing_prev"] or 0)) * 100
+        c4.metric("Meter gaps", f"{snap['missing']:.1%}", f"{pts:+.1f} pts",
+                  delta_color="inverse", delta_description="vs last week", border=True,
+                  chart_data=_spark(snap["missing_daily"] * 100),
+                  chart_type="area",
+                  help="Share of building-hours this week with no energy reading (6 buildings, counted "
+                       "only while each meter was in service). Gaps hide "
+                       "real use, so a rising share is a meter or data-feed problem to check.")
+
+
+def show(df, events, snap):
     analysed = df[df["flag"] != "unreliable meter"]
     high = events[events["direction"] == "high"]
     _, summary = institutional._data()
     _, _, evaluation = predictive._data()
     recs = recommend._recs(events)
 
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Buildings analysed", f"{analysed['building'].nunique()} of {df['building'].nunique()}")
-    c2.metric("Period", f"{df['hour'].min():%Y}-{df['hour'].max():%Y}",
-              help=f"{df['hour'].min():%d %b %Y} to {df['hour'].max():%d %b %Y}")
-    c3.metric("Higher-than-usual events", f"{len(high):,}")
-    c4.metric("Recommendations", f"{len(recs):,}")
+    _hero(df, analysed, high, recs, snap)
+    _cards(snap)
     for building, why in ENERGY_WARNINGS.items():
         st.warning(f"**{building} energy is not analysed.** {why}")
 
@@ -37,7 +101,7 @@ def show(df, events):
     avg = per_day.groupby("building")["sum"].mean().reset_index(name="kwh_per_day")
 
     # ------------------------------------------------------ three questions
-    now, nxt, check = st.columns(3, gap="large")
+    now, nxt, check = st.container(key="questions").columns(3, gap="large")
     with now:
         st.subheader("What is happening")
         lines = []
