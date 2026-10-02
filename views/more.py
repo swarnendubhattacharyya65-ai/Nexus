@@ -171,7 +171,9 @@ HELP = [
      "listed as not placed."),
     ("What does the conversation send to the AI?",
      "Your questions, and the NEXUS numbers the assistant looks up to answer them (for example a "
-     "week's building table), go to Anthropic's API. The raw data files are never sent. Without an "
+     "week's building table), go to the language-model provider whose key is set (Google Gemini or Anthropic). On "
+     "Gemini's free tier, Google may use prompts to improve its products. The raw data files "
+     "are never sent. Without an "
      "API key the Quick answers tab still works, using fixed rules only."),
     ("Is uploaded data stored?",
      "It is sent to the NEXUS server and kept in its memory for your session only. It is not "

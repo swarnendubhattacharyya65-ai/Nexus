@@ -104,12 +104,21 @@ SUGGESTED = ["Which building needs attention this week?", "How is electricity tr
              "How does NEXUS decide an hour is unusual?"]
 
 
-def api_key():
+def _secret(name):
     try:
-        key = st.secrets.get("ANTHROPIC_API_KEY")
+        value = st.secrets.get(name)
     except Exception:   # no secrets file at all
-        key = None
-    return key or os.environ.get("ANTHROPIC_API_KEY")
+        value = None
+    return value or os.environ.get(name)
+
+
+def provider():
+    """('gemini' | 'anthropic', key, model) from the app's secrets, or None. Gemini is preferred (free tier)."""
+    if _secret("GEMINI_API_KEY"):
+        return "gemini", _secret("GEMINI_API_KEY"), _secret("GEMINI_MODEL") or chat.GEMINI_MODEL
+    if _secret("ANTHROPIC_API_KEY"):
+        return "anthropic", _secret("ANTHROPIC_API_KEY"), _secret("ANTHROPIC_MODEL") or chat.DEFAULT_MODEL
+    return None
 
 
 def _context(week_end):
@@ -157,13 +166,15 @@ def _chat_log():
 
 
 def conversation(week_end):
-    key = api_key()
-    if not key:
+    setup = provider()
+    if not setup:
         st.info(
-            "**The conversation needs an Anthropic API key.** Add it once in the app's secrets as "
-            "`ANTHROPIC_API_KEY` (Streamlit Cloud: Manage app, Settings, Secrets). Until then, the "
-            "**Quick answers** tab works without one.", icon=":material/key:")
+            "**The conversation needs an API key.** Add a free Gemini key once in the app's secrets "
+            "as `GEMINI_API_KEY` (Streamlit Cloud: Manage app, Settings, Secrets), or an Anthropic "
+            "key as `ANTHROPIC_API_KEY`. Until then, the **Quick answers** tab works without one.",
+            icon=":material/key:")
         return
+    kind, key, model = setup
     log = _chat_log()
     asked = sum(m["role"] == "user" for m in log)
     if not log:
@@ -186,14 +197,18 @@ def conversation(week_end):
         return
     log.append({"role": "user", "content": prompt})
     ctx = _context(week_end)
-    model = st.secrets.get("ANTHROPIC_MODEL", chat.DEFAULT_MODEL) if _has_secrets() else chat.DEFAULT_MODEL
     with thread:
         _bubble("user", prompt)
         with st.chat_message("assistant", avatar=":material/hub:"):
             try:
-                import anthropic
-                client = anthropic.Anthropic(api_key=key, timeout=60, max_retries=1)
-                text = st.write_stream(chat.reply(client, model, log, ctx))
+                if kind == "gemini":
+                    import requests
+                    stream = chat.reply_gemini(requests.post, key, model, log, ctx)
+                else:
+                    import anthropic
+                    client = anthropic.Anthropic(api_key=key, timeout=60, max_retries=1)
+                    stream = chat.reply(client, model, log, ctx)
+                text = st.write_stream(stream)
             except Exception as e:   # key rejected, no credit, offline ...
                 text = chat.friendly_error(e)
                 st.error(text)
@@ -208,14 +223,6 @@ def _bubble(role, content, used=None):
         st.markdown(content)
         if used:
             st.caption("Looked up: " + ", ".join(dict.fromkeys(used)).replace("_", " "))
-
-
-def _has_secrets():
-    try:
-        st.secrets.get("x")
-        return True
-    except Exception:
-        return False
 
 
 def show(week_end):

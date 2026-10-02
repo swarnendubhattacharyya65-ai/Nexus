@@ -70,3 +70,46 @@ h = [{"role": "assistant", "content": "a"}] + [{"role": "user" if i % 2 == 0 els
 t = chat.trim(h)
 assert t[0]["role"] == "user" and len(t) <= chat.HISTORY_TURNS
 print("chat tests passed")
+
+# ---- Gemini adapter
+class R:
+    def __init__(self, code, data): self.status_code, self._d = code, data
+    def json(self): return self._d
+
+def gpost(script, seen):
+    def post(url, headers=None, json=None, timeout=None):
+        seen.append((url, headers, json)); return script.pop(0)
+    return post
+
+seen = []
+call = {"functionCall": {"name": "building_week", "args": {}}, "thoughtSignature": "sig"}
+script = [R(200, {"candidates": [{"content": {"parts": [call]}}]}),
+          R(200, {"candidates": [{"content": {"parts": [{"text": "Library used 1,200 kWh."}]}}]})]
+c = ctx()
+out = "".join(chat.reply_gemini(gpost(script, seen), "KEY", "gemini-x", [{"role": "user", "content": "hi"}], c))
+assert out == "Library used 1,200 kWh.", out
+assert seen[0][1] == {"x-goog-api-key": "KEY"} and "gemini-x" in seen[0][0]
+decls = seen[0][2]["tools"][0]["functionDeclarations"]
+assert next(d for d in decls if d["name"] == "college_overview").get("parameters") is None      # no empty schema
+ev = next(d for d in decls if d["name"] == "unusual_events")["parameters"]
+assert ev["type"] == "OBJECT" and ev["properties"]["direction"]["enum"] == ["high", "low"]
+second = seen[1][2]["contents"]
+assert second[-2]["parts"][0].get("thoughtSignature") == "sig"            # echoed back unchanged
+fr = second[-1]["parts"][0]["functionResponse"]
+assert fr["name"] == "building_week" and fr["response"]["result"]["rows"][0]["Building"] == "Library"
+assert "Test College" in seen[0][2]["systemInstruction"]["parts"][0]["text"]
+
+for code, body, expect in [(400, {"error": {"message": "API key not valid"}}, "rejected"),
+                           (429, {"error": {"message": "quota"}}, "quota"),
+                           (500, {"error": {"message": "boom"}}, "HTTP 500")]:
+    try:
+        "".join(chat.reply_gemini(gpost([R(code, body)], []), "K", "m", [{"role": "user", "content": "x"}], ctx()))
+        raise SystemExit("should have failed")
+    except chat.GeminiError as e:
+        assert expect in str(e) and chat.friendly_error(e) == str(e)
+try:   # a blocked answer is reported, not shown as empty
+    "".join(chat.reply_gemini(gpost([R(200, {"promptFeedback": {"blockReason": "SAFETY"}})], []), "K", "m", [{"role": "user", "content": "x"}], ctx()))
+    raise SystemExit("should have failed")
+except chat.GeminiError as e:
+    assert "SAFETY" in str(e)
+print("gemini tests passed")

@@ -125,10 +125,18 @@ All thresholds are named constants at the top of each file in `nexus/`.
   threshold, the finding that triggered it and the evidence.
 
 ## Chatbot setup
-The conversation needs an Anthropic API key. On Streamlit Cloud: Manage app, Settings,
-Secrets, then add `ANTHROPIC_API_KEY = "sk-ant-..."` (optionally `ANTHROPIC_MODEL`). Never put
-the key in GitHub. A public link lets anyone spend your credit, so set a monthly spend limit
-for the key in the Anthropic Console; the app also stops after 30 questions per session.
+The conversation needs an API key, added in the app's secrets (Streamlit Cloud: Manage app,
+Settings, Secrets). Never put a key in GitHub.
+
+- **Free option, Google Gemini:** create a key at https://aistudio.google.com/apikey and add
+  `GEMINI_API_KEY = "..."`. Optionally `GEMINI_MODEL` (default `gemini-2.5-flash`; change it if
+  Google retires that name). Free-tier limits and data terms are Google's and can change; on the
+  free tier prompts may be used to improve Google's products, which is acceptable for public
+  data only.
+- **Anthropic:** `ANTHROPIC_API_KEY = "sk-ant-..."` (optionally `ANTHROPIC_MODEL`). Paid.
+- If both are set, Gemini is used.
+
+A public link lets anyone use your quota, so the app stops after 30 questions per session.
 Without a key the Quick answers tab still works.
 
 ## Other colleges

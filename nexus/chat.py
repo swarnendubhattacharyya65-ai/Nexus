@@ -201,9 +201,88 @@ def reply(client, model, history, ctx):
     yield "\n\n(I stopped after several lookups. Ask again more narrowly.)"
 
 
+# ------------------------------------------------------------------ Gemini (free tier)
+
+GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+
+
+class GeminiError(Exception):
+    """The Gemini API refused or failed; the message is safe to show."""
+
+
+def _schema(node):
+    """JSON-schema from TOOLS -> Gemini's schema (upper-case type names)."""
+    out = {k: v for k, v in node.items() if k in ("description", "enum", "required")}
+    if "type" in node:
+        out["type"] = node["type"].upper()
+    if "properties" in node:
+        out["properties"] = {k: _schema(v) for k, v in node["properties"].items()}
+    return out
+
+
+def gemini_tools():
+    decls = []
+    for t in TOOLS:
+        d = {"name": t["name"], "description": t["description"]}
+        if t["input_schema"].get("properties"):      # Gemini rejects an empty parameter object
+            d["parameters"] = _schema(t["input_schema"])
+        decls.append(d)
+    return [{"functionDeclarations": decls}]
+
+
+def _gemini_call(post, key, model, body):
+    r = post(GEMINI_URL.format(model=model), headers={"x-goog-api-key": key}, json=body, timeout=60)
+    if r.status_code != 200:
+        msg = ""
+        try:
+            msg = r.json().get("error", {}).get("message", "")
+        except ValueError:
+            pass
+        if r.status_code in (400, 401, 403) and "key" in msg.lower():
+            raise GeminiError("The Gemini API key was rejected. Check the key in the app's secrets.")
+        if r.status_code == 429:
+            raise GeminiError("The free Gemini quota is used up for now. Wait a minute and try again.")
+        raise GeminiError(f"Gemini could not answer (HTTP {r.status_code}). {msg[:200]}")
+    return r.json()
+
+
+def reply_gemini(post, key, model, history, ctx):
+    """Like reply(), for Gemini's REST API. `post` is requests.post (or a fake in tests)."""
+    contents = [{"role": "user" if m["role"] == "user" else "model", "parts": [{"text": m["content"]}]}
+                for m in trim(history)]
+    body = {"systemInstruction": {"parts": [{"text": system_prompt(ctx)}]},
+            "tools": gemini_tools(), "generationConfig": {"maxOutputTokens": MAX_TOKENS}}
+    for _ in range(MAX_ROUNDS):
+        data = _gemini_call(post, key, model, {**body, "contents": contents})
+        cands = data.get("candidates") or []
+        if not cands or "content" not in cands[0]:
+            reason = (data.get("promptFeedback") or {}).get("blockReason") or (cands[0].get("finishReason") if cands else "")
+            raise GeminiError(f"Gemini returned no answer ({reason or 'empty response'}). Try rephrasing.")
+        parts = cands[0]["content"].get("parts", [])
+        calls = [p["functionCall"] for p in parts if "functionCall" in p]
+        text = "".join(p.get("text", "") for p in parts if not p.get("thought"))
+        for i in range(0, len(text), 40):             # the REST answer arrives whole; show it as it is read
+            yield text[i:i + 40]
+        if not calls:
+            return
+        if text:
+            yield "\n\n"
+        contents.append({"role": "model", "parts": parts})   # parts echoed back unchanged (keeps thought signatures)
+        contents.append({"role": "user", "parts": [
+            {"functionResponse": {"name": c["name"],
+                                  "response": {"result": json.loads(run_tool(c["name"], c.get("args") or {}, ctx))}}}
+            for c in calls]})
+    yield "\n\n(I stopped after several lookups. Ask again more narrowly.)"
+
+
 def friendly_error(e):
     """A short, honest message for an API failure."""
     name = type(e).__name__
+    if isinstance(e, GeminiError):
+        return str(e)
+    if name in ("ConnectionError", "Timeout", "ReadTimeout", "ConnectTimeout"):
+        return "Could not reach the language model. Check the connection and try again."
     if name == "AuthenticationError":
         return "The API key was rejected. Check the key in the app's secrets."
     if name == "RateLimitError":
