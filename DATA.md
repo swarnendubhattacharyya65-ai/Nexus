@@ -46,6 +46,13 @@
 5. **Assumption: a missing occupancy slot = 0 people only in buildings that empty at night.** The files never contain 0, so a gap can mean "nobody connected" or "no data". On days the Wi-Fi system was running (at least half the day's slots recorded), gaps are set to 0 only for buildings whose gaps fall between 00:00 and 06:00 at least 40% of the time (chance would be 25%). On the real data: Lecture 49%, Library 49%, Facilities 50%, Dining 46% (set to 0); Academic 31%, Boys dorm 29%, Girls dorm 32% (left blank). The build prints this table every time. Outage days are always blank.
 6. **Semester weeks are derived.** Because weekends are always low-activity days (see Calendar), a Monday-Sunday week counts as a semester week when at least 3 of its 5 weekdays are high-activity days. Used for occupancy patterns and the energy-when-quiet comparison.
 
+## Campus map data (`data/campus/`)
+- Building outlines and floor counts: OpenStreetMap, downloaded 2026-10-02 with `python scripts/fetch_campus.py`. (c) OpenStreetMap contributors, Open Database License (ODbL); the attribution is shown on the map.
+- The map shows today's campus. Some buildings in OpenStreetMap (R&D Block, New Boys Hostel, Sports Block) are Phase II buildings opened from August 2017, after or at the end of the data period, so they are drawn as not metered.
+- `building_map.csv` matches five I-BLEND buildings to outlines: Academic, Library, Girls dorm and Boys dorm by name, Dining by use (inferred, see the file). Lecture and Facilities are not identified in OpenStreetMap and are left off the map rather than guessed.
+- Heights: OpenStreetMap floors x 3.5 m where recorded, otherwise 12 m.
+- Basemap tiles: CARTO dark (OpenStreetMap data); satellite view: Esri World Imagery. Both load in the viewer's browser and carry their attribution on the map.
+
 ## Still open
 - Facilities spikes: real events (e.g. window ACs) or meter glitches? Look at when they happen.
 - Transformers are not used yet.

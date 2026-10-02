@@ -59,7 +59,7 @@ CSS = """
 
 /* narrow main area (portrait tablet, or sidebar open on a small screen) */
 [data-testid="stMainBlockContainer"] { container-type: inline-size; }
-@container (max-width: 880px) {
+@container (max-width: 760px) {
   .st-key-kpis [data-testid="stHorizontalBlock"],
   .st-key-topbar [data-testid="stHorizontalBlock"] { flex-wrap: wrap; row-gap: 1rem; }
   .st-key-kpis [data-testid="stColumn"],

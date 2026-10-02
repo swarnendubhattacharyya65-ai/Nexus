@@ -5,6 +5,7 @@ Reads only the small tables in data/processed/, so it also runs when deployed.
 """
 from pathlib import Path
 
+import pandas as pd
 import streamlit as st
 
 from nexus.data import OUT
@@ -20,7 +21,8 @@ if not (OUT / "energy_hourly.parquet").exists():
     st.error("No processed data found. In the codespace, run `python -m nexus.data` first.")
     st.stop()
 
-from views import common, institutional, overview, predictive, recommend, resource  # noqa: E402
+from views import (campus_map, common, institutional, overview, predictive,  # noqa: E402
+                   recommend, resource)
 from nexus.predictive import HORIZON  # noqa: E402
 
 
@@ -61,6 +63,26 @@ def recommendations_page():
     recommend.show(common.load()[1])
 
 
+def campus_page():
+    shell.page_header("Campus Map",
+                      "IIIT-Delhi's real buildings in 3D, coloured by what NEXUS found in the "
+                      "week chosen at the top. Switch layers on the map; drag to rotate, pinch "
+                      "to zoom.")
+    if not campus_map.outlines_ready():
+        st.info("Building outlines are not downloaded yet. In the codespace, run "
+                "`python scripts/fetch_campus.py`, then commit the `data/campus` folder.")
+        return
+    week_end = pd.Timestamp(st.session_state["week_end"])
+    df, _ = common.load()
+    status = campus_map.week_status(week_end, df, common.occupancy())
+    buildings, outline = campus_map.load_outlines()
+    picked = campus_map.render(campus_map.payload(buildings, outline, status,
+                                                  f"Week ending {week_end:%a %-d %b %Y}"))
+    campus_map.details(status, picked.picked if picked else None)
+    campus_map.status_table(status)
+    campus_map.matching_notes(status)
+
+
 def data_page():
     st.markdown(Path("DATA.md").read_text())
 
@@ -76,6 +98,7 @@ PAGES = {
                           icon=":material/trending_up:", url_path="predictive"),
     "recommendations": st.Page(recommendations_page, title="Recommendations",
                                icon=":material/checklist:", url_path="recommendations"),
+    "campus": st.Page(campus_page, title="Campus Map", icon=":material/map:", url_path="campus"),
     "data": st.Page(data_page, title="Data & method", icon=":material/description:",
                     url_path="data"),
 }
@@ -83,6 +106,7 @@ PAGES = {
 page = st.navigation({
     "Intelligence": [PAGES[k] for k in ["overview", "resource", "institutional", "predictive",
                                         "recommendations"]],
+    "Campus": [PAGES["campus"]],
     "About the data": [PAGES["data"]],
 })
 
