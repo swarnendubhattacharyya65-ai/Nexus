@@ -35,26 +35,40 @@ def college():
     return name if name in colleges() else IIITD
 
 
+def _code_version():
+    """Fingerprint of the analysis code, so a deploy never reuses results cached by older code."""
+    import hashlib
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    h = hashlib.sha1()
+    for f in sorted([*(root / "nexus").glob("*.py"), *(root / "views").glob("*.py")]):
+        h.update(f.read_bytes())
+    return h.hexdigest()[:12]
+
+
+VERSION = _code_version()
+
+
 @st.cache_resource(show_spinner=False)
-def _iiitd():
+def _iiitd(version):
     return iiitd()
 
 
 def dataset():
     name = college()
-    return _iiitd() if name == IIITD else uploads()[name]["dataset"]
+    return _iiitd(VERSION) if name == IIITD else uploads()[name]["dataset"]
 
 
 @st.cache_resource(show_spinner="Running the analysis ...")
-def _shared(kind, _fn):
-    return _fn(_iiitd())
+def _shared(kind, _fn, version):
+    return _fn(_iiitd(version))
 
 
 def compute(kind, fn, spinner="Working ..."):
     """fn(dataset) for the selected college, computed once. Results are shared: don't modify them."""
     name = college()
     if name == IIITD:
-        return _shared(kind, fn)
+        return _shared(kind, fn, VERSION)
     memo = uploads()[name].setdefault("memo", {})
     if kind not in memo:
         with st.spinner(spinner):
