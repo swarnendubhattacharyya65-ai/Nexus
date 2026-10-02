@@ -71,7 +71,7 @@ python -m nexus.recommend       # every recommendation with its evidence
 ## Project structure
 ```
 app.py                   Streamlit app: header, tabs, Resource Intelligence tab
-views/                   One file per remaining tab (overview, institutional, predictive, recommend)
+views/                   The other tabs, one file each
 nexus/data.py            Raw files -> hourly tables in data/processed/, plus data checks
 nexus/resource.py        Baselines and unusual events
 nexus/institutional.py   Occupancy patterns and energy when near-empty

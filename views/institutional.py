@@ -85,7 +85,7 @@ def show():
                      alt.Tooltip("quiet_kwh:Q", title="Quiet hours, kWh/h", format=",.1f"),
                      alt.Tooltip("busy_kwh:Q", title="Busy hours, kWh/h", format=",.1f"),
                      alt.Tooltip("quiet_vs_busy:Q", title="Quiet as % of busy", format=".0%")],
-        ).properties(height=40 * len(energy))
+        ).properties(height=alt.Step(40))  # 40 px per building, plus room for the axis
         st.altair_chart(bars, width="stretch")
     skipped = summary[summary["energy_note"] != ""]
     for r in skipped.itertuples():

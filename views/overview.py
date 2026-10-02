@@ -96,7 +96,7 @@ def show(df, events):
                 scale=alt.Scale(paddingInner=0.45)),
         tooltip=[alt.Tooltip("building:N", title="Building"),
                  alt.Tooltip("kwh_per_day:Q", title="kWh per day", format=",.0f")],
-    ).properties(height=36 * max(len(avg), 1))
+    ).properties(height=alt.Step(36))  # 36 px per building, plus room for the axis
     st.altair_chart(bars, width="stretch")
 
     st.subheader("Largest higher-than-usual events")
