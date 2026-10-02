@@ -11,6 +11,7 @@ import streamlit as st
 
 from nexus.data import ENERGY_WARNINGS, OUT
 from nexus.resource import MIN_CHANGE, Z_LIMIT, add_baseline, find_events, load_energy
+from views import institutional as institutional_view
 
 ACTUAL = "#2a78d6"    # the measured series
 EXPECTED = "#8c8b86"  # neutral grey for the baseline and its normal range
@@ -59,7 +60,8 @@ df, events = load()
 analysed = df[df["flag"] != "unreliable meter"]
 high_events = events[events["direction"] == "high"]
 
-overview, resource, method = st.tabs(["Overview", "Resource Intelligence", "Data & method"])
+overview, resource, inst_tab, method = st.tabs(
+    ["Overview", "Resource Intelligence", "Institutional Intelligence", "Data & method"])
 
 # ---------------------------------------------------------------- overview
 
@@ -158,7 +160,7 @@ with resource:
                   delta_color="inverse")
         st.markdown(
             f"**{e['start']:%A %d %B %Y, %H:%M}** to **{e['end']:%a %d %b, %H:%M}** ({e['hours']} hours, "
-            f"{e['activity']}-activity period). Expected = the median of at least {e['samples']:.0f} "
+            f"{e['activity']}-activity day). Expected = the median of at least {e['samples']:.0f} "
             "comparable hours: same hour of day, same day type and same academic activity, "
             f"within 3 weeks either side. Flagged because each hour was more than {Z_LIMIT} times "
             f"the normal variation away and at least {MIN_CHANGE:.0%} different.")
@@ -199,6 +201,9 @@ with resource:
                          hide_index=True)
 
 # ----------------------------------------------------------------- method
+
+with inst_tab:
+    institutional_view.show()
 
 with method:
     st.markdown(Path("DATA.md").read_text())

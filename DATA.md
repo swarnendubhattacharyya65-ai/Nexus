@@ -29,21 +29,22 @@
 
 **Occupancy** (`data/raw/IIITD_occupancy_dataset/`, 10-minute): `timestamp`, `occupancy_count` = estimated people from Wi-Fi connections (max of each 10-minute window). 2014-02-16 to 2017-11-03 (Facilities from 2014-07-10). The files contain no zeros.
 
-**Calendar** (`data/raw/iiitd_calender_schedule/`, daily): `Date`, `working_day` (1/0), `activity` (H high-activity semester, L breaks). Complete 2013-08-01 to 2017-12-31.
+**Calendar** (`data/raw/iiitd_calender_schedule/`, daily): `Date`, `working_day` (1/0), `activity` (H/L). Complete 2013-08-01 to 2017-12-31. `activity` marks single days, not whole periods: across 2013-2017, Monday-Friday are high-activity on 135-143 days each, Saturdays on 3 days and Sundays never. So H means a high-activity day (a semester weekday), and weekends are L even during semesters.
 
 ## Processed tables (`data/processed/`, built by `python -m nexus.data`)
 | File | One row per | Columns |
 |---|---|---|
 | energy_hourly.parquet | building and hour | `hour`, `building`, `kwh` (blank if fewer than 45 of 60 minutes recorded; a dorm is mains + UPS and blank if either is blank) |
 | occupancy_hourly.parquet | building and hour | `hour`, `building`, `occ_mean`, `occ_max`, `slots_recorded`, `slots_set_to_0` |
-| calendar.parquet | day | `date`, `working_day`, `activity` (high/low) |
+| calendar.parquet | day | `date`, `working_day`, `activity` (high/low), `semester_week` (derived, see decision 6) |
 
 ## Decisions (from `python -m nexus.data --check`, 2026-10-02)
 1. **Use the combined power file.** It matches the separate meter files to within 0.005 W (0.048 W for Dining), which is CSV rounding.
 2. **Lecture energy is excluded from findings.** The meter reads exactly 0 W for 81.7% of recorded minutes, including 48.6% of working-day 09:00-17:00 minutes. We judge a building of nine classrooms in use is very unlikely to draw nothing, so the meter is treated as unreliable. Lecture occupancy is still used.
 3. **Spikes are kept and flagged, never silently deleted.** Minutes above twice the 99th percentile: Facilities 1,232 (max 139.4 kW vs p99 21.1 kW), Dining 67, Library 2, Boys mains 1, all others 0. They are candidates for investigation, not confirmed problems.
 4. **Zero readings outside Lecture are rare** (0.3% or less) and kept as real readings.
-5. **Assumption: a missing occupancy slot = 0 people on days the Wi-Fi system was running** (at least half the day's slots recorded). Days below that are blank. Evidence: the files never contain 0, and on running days missing slots fall between 00:00 and 06:00 about twice as often as chance (25%) in buildings that empty at night (Lecture 49%, Library 49%, Facilities 50%, Dining 46%) but not in buildings occupied at night (Academic 31%, dorms 29-32%).
+5. **Assumption: a missing occupancy slot = 0 people only in buildings that empty at night.** The files never contain 0, so a gap can mean "nobody connected" or "no data". On days the Wi-Fi system was running (at least half the day's slots recorded), gaps are set to 0 only for buildings whose gaps fall between 00:00 and 06:00 at least 40% of the time (chance would be 25%). On the real data: Lecture 49%, Library 49%, Facilities 50%, Dining 46% (set to 0); Academic 31%, Boys dorm 29%, Girls dorm 32% (left blank). The build prints this table every time. Outage days are always blank.
+6. **Semester weeks are derived.** Because weekends are always low-activity days (see Calendar), a Monday-Sunday week counts as a semester week when at least 3 of its 5 weekdays are high-activity days. Used for occupancy patterns and the energy-when-quiet comparison.
 
 ## Still open
 - Facilities spikes: real events (e.g. window ACs) or meter glitches? Look at when they happen.

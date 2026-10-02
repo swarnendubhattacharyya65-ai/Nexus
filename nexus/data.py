@@ -19,11 +19,13 @@ TZ = "Asia/Kolkata"
 # recorded (45 of 60). Otherwise it stays blank instead of being guessed.
 MIN_COVERAGE = 0.75
 
-# The occupancy files never contain a 0, yet buildings like Lecture empty at
-# night. So a missing 10-minute slot counts as 0 people on days when the Wi-Fi
-# system was clearly running (at least half the day's slots recorded).
-# Days below that are treated as outages and left blank.
+# The occupancy files never contain a 0. A missing 10-minute slot can mean
+# "nobody connected" or "no data". On days the Wi-Fi system was running (at
+# least half the day's slots recorded), a building's gaps are read as 0 people
+# only if they cluster at night (00:00-06:00), where chance would give 25%.
+# Otherwise, and on outage days, gaps stay blank.
 MIN_DAY_SLOTS = 0.5
+NIGHT_GAP_SHARE = 0.40
 
 # Buildings whose energy readings must not be used for findings, and why.
 # Source: CHECK 2 of `python -m nexus.data --check`, run 2026-10-02.
@@ -94,7 +96,15 @@ def load_calendar():
         "working_day": cal["working_day"] == 1,
         "activity": cal["activity"].map({"H": "high", "L": "low"}),
     })
-    return cal.drop_duplicates("date").sort_values("date", ignore_index=True)
+    cal = cal.drop_duplicates("date").sort_values("date", ignore_index=True)
+
+    # "high" marks individual days (semester weekdays), so weekends are always
+    # "low". A whole Monday-Sunday week counts as a semester week when at least
+    # 3 of its 5 weekdays are high-activity days.
+    week = cal["date"].dt.to_period("W-SUN")
+    weekday_high = (cal["activity"] == "high") & (cal["date"].dt.dayofweek < 5)
+    cal["semester_week"] = weekday_high.groupby(week).transform("sum") >= 3
+    return cal
 
 
 # ---------------------------------------------------------- hourly tables
@@ -121,12 +131,12 @@ def hourly_energy(minutes):
 
 
 def fill_occupancy(occ):
-    """Put each building on a full 10-minute grid.
+    """Put each building on a full 10-minute grid and decide what its gaps mean.
 
-    Missing slots on running days become 0 (and are marked `filled`);
-    missing slots on outage days stay blank.
+    Returns the grid (gaps set to 0 are marked `filled`) and, per building:
+    gaps on running days, the share of them at night, and whether they became 0.
     """
-    frames = []
+    frames, decisions = [], {}
     for building, g in occ.groupby("building"):
         s = g.set_index("time")["occupancy"].sort_index()
         grid = pd.date_range(s.index.min().normalize(),
@@ -134,14 +144,18 @@ def fill_occupancy(occ):
                              freq="10min", inclusive="left")
         s = s.reindex(grid)
         day_share = s.notna().groupby(grid.normalize()).transform("mean")
-        filled = s.isna() & (day_share >= MIN_DAY_SLOTS)
+        gaps = s.isna() & (day_share >= MIN_DAY_SLOTS)
+        night = (grid[gaps.to_numpy()].hour < 6).mean() if gaps.any() else 0.0
+        empty_at_night = night >= NIGHT_GAP_SHARE
+        filled = gaps & empty_at_night
+        decisions[building] = (int(gaps.sum()), night, empty_at_night)
         frames.append(pd.DataFrame({
             "time": grid,
             "building": building,
             "occupancy": s.mask(filled, 0).to_numpy(),
             "filled": filled.to_numpy(),
         }))
-    return pd.concat(frames, ignore_index=True)
+    return pd.concat(frames, ignore_index=True), decisions
 
 
 def hourly_occupancy(slots):
@@ -187,21 +201,6 @@ def check_meters(minutes, cal):
     print(f"  Lecture zeros on working days 09:00-17:00: {(lec[daytime] == 0).mean():.1%}")
 
 
-def check_occupancy_gaps(occ):
-    print("\nCHECK 3  missing occupancy slots, on days that otherwise have data")
-    print("  (share falling 00:00-06:00; about 25% means no night pattern)")
-    for building, g in occ.groupby("building"):
-        times = pd.DatetimeIndex(g["time"])
-        grid = pd.date_range(times.min().normalize(),
-                             times.max().normalize() + pd.Timedelta("1D"),
-                             freq="10min", inclusive="left")
-        present = pd.Series(grid.isin(times), index=grid)
-        day_share = present.groupby(grid.normalize()).transform("mean")
-        missing = grid[(~present & (day_share >= 0.5)).to_numpy()]
-        night = (missing.hour < 6).mean() if len(missing) else float("nan")
-        print(f"  {building:12}{len(missing):>9,} missing slots   {night:>6.1%} at night")
-
-
 # ------------------------------------------------------------------ build
 
 def main(run_checks=False):
@@ -209,7 +208,7 @@ def main(run_checks=False):
     print("Reading 1-minute power ...")
     minutes = load_power_minutes()
     occ = load_occupancy()
-    slots = fill_occupancy(occ)
+    slots, decisions = fill_occupancy(occ)
     cal = load_calendar()
 
     tables = {
@@ -233,13 +232,17 @@ def main(run_checks=False):
         recorded = (g["occupancy"].notna() & ~g["filled"]).mean()
         print(f"  {building:12}{kwh_ok[building]:>10.1%}{'':>20}"
               f"{recorded:>7.1%}{g['filled'].mean():>10.1%}{g['occupancy'].isna().mean():>8.1%}")
+    print(f"\n  OCCUPANCY GAPS on running days (chance at night = 25%; "
+          f"0 people if at least {NIGHT_GAP_SHARE:.0%})")
+    for building, (gaps, night, empty) in decisions.items():
+        print(f"  {building:12}{gaps:>9,} gaps {night:>7.1%} at night  -> "
+              f"{'0 people' if empty else 'left blank'}")
     for building, why in ENERGY_WARNINGS.items():
         print(f"\n  WARNING {building} energy: {why}")
 
     if run_checks:
         check_against_meter_files(minutes)
         check_meters(minutes, cal)
-        check_occupancy_gaps(occ)
     else:
         print("\n(add --check to also run the slow data checks)")
 
