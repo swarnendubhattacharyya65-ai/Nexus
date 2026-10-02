@@ -14,6 +14,7 @@ from nexus.resource import MIN_CHANGE, Z_LIMIT, add_baseline, find_events, load_
 from views import institutional as institutional_view
 from views import predictive as predictive_view
 from views import recommend as recommend_view
+from views import overview as overview_view
 
 ACTUAL = "#2a78d6"    # the measured series
 EXPECTED = "#8c8b86"  # neutral grey for the baseline and its normal range
@@ -69,32 +70,7 @@ overview, resource, inst_tab, pred_tab, rec_tab, method = st.tabs(
 # ---------------------------------------------------------------- overview
 
 with overview:
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Buildings analysed", f"{analysed['building'].nunique()} of {df['building'].nunique()}")
-    c2.metric("Period", f"{df['hour'].min():%Y}-{df['hour'].max():%Y}",
-              help=f"{df['hour'].min():%d %b %Y} to {df['hour'].max():%d %b %Y}")
-    c3.metric("Hours with a baseline", f"{analysed['flag'].isin(['normal', 'high', 'low']).sum():,}")
-    c4.metric("Higher-than-usual events", f"{len(high_events):,}")
-    for building, why in ENERGY_WARNINGS.items():
-        st.warning(f"**{building} energy is not analysed.** {why}")
-
-    st.subheader("Average energy per day")
-    per_day = (analysed.assign(day=analysed["hour"].dt.normalize())
-               .groupby(["building", "day"])["kwh"].agg(["sum", "count"]))
-    per_day = per_day[per_day["count"] == 24]  # complete days only
-    avg = per_day.groupby("building")["sum"].mean().reset_index(name="kwh_per_day")
-    bars = alt.Chart(avg).mark_bar(color=ACTUAL, cornerRadiusEnd=4).encode(
-        x=alt.X("kwh_per_day:Q", title="kWh per day (average over complete days)",
-                axis=alt.Axis(tickCount=5)),
-        y=alt.Y("building:N", sort="-x", title=None, axis=alt.Axis(grid=False),
-                scale=alt.Scale(paddingInner=0.45)),
-        tooltip=[alt.Tooltip("building:N", title="Building"),
-                 alt.Tooltip("kwh_per_day:Q", title="kWh per day", format=",.0f")],
-    ).properties(height=36 * len(avg))
-    st.altair_chart(bars, width="stretch")
-
-    st.subheader("Largest higher-than-usual events")
-    st.dataframe(events_table(high_events.head(10)), hide_index=True)
+    overview_view.show(df, events)
 
 # --------------------------------------------------------------- resource
 
