@@ -3,8 +3,10 @@
 Reads the raw minute-level files in data/raw/ (1.6 GB, never committed) and
 writes small, clean hourly tables to data/processed/ (committed, read by the app).
 
-Rebuild and re-check everything:   python -m nexus.data
+Rebuild:                       python -m nexus.data
+Rebuild and run all checks:    python -m nexus.data --check
 """
+import sys
 from pathlib import Path
 
 import pandas as pd
@@ -16,6 +18,19 @@ TZ = "Asia/Kolkata"
 # An hour's energy is only calculated if at least 75% of its minutes were
 # recorded (45 of 60). Otherwise it stays blank instead of being guessed.
 MIN_COVERAGE = 0.75
+
+# The occupancy files never contain a 0, yet buildings like Lecture empty at
+# night. So a missing 10-minute slot counts as 0 people on days when the Wi-Fi
+# system was clearly running (at least half the day's slots recorded).
+# Days below that are treated as outages and left blank.
+MIN_DAY_SLOTS = 0.5
+
+# Buildings whose energy readings must not be used for findings, and why.
+# Source: CHECK 2 of `python -m nexus.data --check`, run 2026-10-02.
+ENERGY_WARNINGS = {
+    "Lecture": "The meter reads exactly 0 W for 82% of recorded minutes, "
+               "including 49% of working-day class hours (09:00-17:00).",
+}
 
 # Column in all_buildings_power.csv -> the building it belongs to.
 # Dorms have two meters (mains + UPS backup); the building total is their sum.
@@ -105,11 +120,41 @@ def hourly_energy(minutes):
     return wide.reset_index().melt(id_vars="hour", var_name="building", value_name="kwh")
 
 
-def hourly_occupancy(occ):
-    """Hourly mean and max occupancy, and how many of the 6 slots were present."""
-    occ = occ.assign(hour=occ["time"].dt.floor("h"))
-    return (occ.groupby(["hour", "building"], as_index=False)["occupancy"]
-               .agg(occ_mean="mean", occ_max="max", occ_slots="count"))
+def fill_occupancy(occ):
+    """Put each building on a full 10-minute grid.
+
+    Missing slots on running days become 0 (and are marked `filled`);
+    missing slots on outage days stay blank.
+    """
+    frames = []
+    for building, g in occ.groupby("building"):
+        s = g.set_index("time")["occupancy"].sort_index()
+        grid = pd.date_range(s.index.min().normalize(),
+                             s.index.max().normalize() + pd.Timedelta("1D"),
+                             freq="10min", inclusive="left")
+        s = s.reindex(grid)
+        day_share = s.notna().groupby(grid.normalize()).transform("mean")
+        filled = s.isna() & (day_share >= MIN_DAY_SLOTS)
+        frames.append(pd.DataFrame({
+            "time": grid,
+            "building": building,
+            "occupancy": s.mask(filled, 0).to_numpy(),
+            "filled": filled.to_numpy(),
+        }))
+    return pd.concat(frames, ignore_index=True)
+
+
+def hourly_occupancy(slots):
+    """Hourly mean and max people per building, from the 10-minute grid."""
+    slots = slots.assign(
+        hour=slots["time"].dt.floor("h"),
+        recorded=slots["occupancy"].notna() & ~slots["filled"],
+    )
+    return (slots.groupby(["hour", "building"], as_index=False)
+                 .agg(occ_mean=("occupancy", "mean"),
+                      occ_max=("occupancy", "max"),
+                      slots_recorded=("recorded", "sum"),
+                      slots_set_to_0=("filled", "sum")))
 
 
 # ----------------------------------------------------------------- checks
@@ -159,16 +204,17 @@ def check_occupancy_gaps(occ):
 
 # ------------------------------------------------------------------ build
 
-def main():
+def main(run_checks=False):
     OUT.mkdir(parents=True, exist_ok=True)
-    print("Reading 1-minute power (about a minute) ...")
+    print("Reading 1-minute power ...")
     minutes = load_power_minutes()
     occ = load_occupancy()
+    slots = fill_occupancy(occ)
     cal = load_calendar()
 
     tables = {
         "energy_hourly.parquet": hourly_energy(minutes),
-        "occupancy_hourly.parquet": hourly_occupancy(occ),
+        "occupancy_hourly.parquet": hourly_occupancy(slots),
         "calendar.parquet": cal,
     }
     print(f"\nBUILT {OUT}/")
@@ -180,14 +226,23 @@ def main():
         print(f"  {name:26}{len(df):>9,} rows  {first:%Y-%m-%d} to {last:%Y-%m-%d}  {size:.1f} MB")
 
     energy = tables["energy_hourly.parquet"]
-    print("\n  share of hours with a valid kWh value")
-    for building, s in energy.groupby("building")["kwh"]:
-        print(f"  {building:12}{s.notna().mean():>7.1%}")
+    kwh_ok = energy.groupby("building")["kwh"].apply(lambda s: s.notna().mean())
+    print(f"\n  {'building':12}{'kWh hours':>10}   occupancy slots: "
+          f"{'recorded':>9}{'set to 0':>10}{'blank':>8}")
+    for building, g in slots.groupby("building"):
+        recorded = (g["occupancy"].notna() & ~g["filled"]).mean()
+        print(f"  {building:12}{kwh_ok[building]:>10.1%}{'':>20}"
+              f"{recorded:>7.1%}{g['filled'].mean():>10.1%}{g['occupancy'].isna().mean():>8.1%}")
+    for building, why in ENERGY_WARNINGS.items():
+        print(f"\n  WARNING {building} energy: {why}")
 
-    check_against_meter_files(minutes)
-    check_meters(minutes, cal)
-    check_occupancy_gaps(occ)
+    if run_checks:
+        check_against_meter_files(minutes)
+        check_meters(minutes, cal)
+        check_occupancy_gaps(occ)
+    else:
+        print("\n(add --check to also run the slow data checks)")
 
 
 if __name__ == "__main__":
-    main()
+    main(run_checks="--check" in sys.argv)

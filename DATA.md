@@ -10,53 +10,49 @@
 - License: CC0 1.0 (public domain) for the energy, occupancy and calendar files. We still cite the paper.
 - Downloaded 2026-10-02. Raw files live in `data/raw/` and are not committed (1.6 GB).
 
-## Energy: `data/raw/energy_dataset/` (one CSV per meter, 1-minute)
-Columns: `timestamp` (Unix seconds), `power` (W), `current`, `voltage`, `frequency`, `power_factor`.
-Timestamps convert to Asia/Kolkata (UTC+5:30).
+## Raw files
+**Energy** (`data/raw/energy_dataset/`, 1-minute, power in watts, Unix timestamps converted to Asia/Kolkata)
+- Main input: `all_buildings_power.csv`, all nine building meters on one 1-minute grid, `NA` = not recorded.
+- Also one file per meter (`acad_build_mains.csv` etc.) with `timestamp`, `power`, `current`, `voltage`, `frequency`, `power_factor`; used only to cross-check the combined file.
+- `data_present_status_*.csv`: per-minute 1/0 flags for whether each meter recorded data.
+- `all_transformer_power.csv`, `transformer_*.csv`: three campus supply transformers. Not used yet. Never add them to buildings (double counting).
 
-| Meter file | Building | Occupancy file | First | Last | Missing | Median W |
-|---|---|---|---|---|---|---|
-| acad_build_mains | Academic | ACB | 2013-08-10 | 2017-12-31 | 1.8% | 23,342 |
-| lecture_build_mains | Lecture | LCB | 2013-08-10 | 2017-12-31 | 1.8% | 0 (check) |
-| library_build_mains | Library | LB | 2013-08-10 | 2017-12-31 | 25.9% | 6,711 |
-| mess_build_mains | Dining ("Mess") | DB | 2013-09-24 | 2017-12-31 | 10.4% | 20,648 |
-| facilities_build_mains | Facilities | SRB | 2013-11-15 | 2017-12-31 | 5.6% | 9,861 |
-| boys_hostel_mains | Boys dorm, mains | BH | 2013-08-10 | 2017-12-31 | 27.7% | 15,594 |
-| boys_hostel_ups | Boys dorm, UPS backup | BH | 2013-08-10 | 2017-12-31 | 27.0% | 13,069 |
-| girls_hostel_mains | Girls dorm, mains | GH | 2013-08-10 | 2017-12-31 | 28.5% | 7,080 |
-| girls_hostel_ups | Girls dorm, UPS backup | GH | 2013-08-10 | 2017-12-31 | 0.5% | 6,783 |
-| transformer_1 | Campus supply (not a building) | - | 2013-11-26 | 2017-12-31 | 34.2% | 27,841 |
-| transformer_2 | Campus supply (not a building) | - | 2013-11-26 | 2017-12-31 | 6.2% | 93,363 |
-| transformer_3 | Campus supply (not a building) | - | 2013-11-26 | 2017-12-31 | 5.8% | 70,192 |
+| Meter column | Building | Occupancy code | First | Last | Missing minutes |
+|---|---|---|---|---|---|
+| Academic | Academic | ACB | 2013-08-10 | 2017-12-31 | 1.8% |
+| Lecture | Lecture | LCB | 2013-08-10 | 2017-12-31 | 1.8% |
+| Library | Library | LB | 2013-08-10 | 2017-12-31 | 25.9% |
+| Mess | Dining | DB | 2013-09-24 | 2017-12-31 | 10.4% |
+| Facilities | Facilities | SRB | 2013-11-15 | 2017-12-31 | 5.6% |
+| Boys_main + Boys_backup | Boys dorm (mains + UPS) | BH | 2013-08-10 | 2017-12-31 | 27.7% / 27.0% |
+| Girls_main + Girls_backup | Girls dorm (mains + UPS) | GH | 2013-08-10 | 2017-12-31 | 28.5% / 0.5% |
 
-- A dorm's total = mains + UPS (two separate supplies).
-- Never add transformers to buildings: transformers feed the buildings, so that double counts.
-- Not yet inspected: `all_buildings_power.csv`, `all_transformer_power.csv` (wide tables, one column per meter; the source spells it "transfomer"), `data_present_status_buildings.csv`, `data_present_status_transformers.csv`.
+**Occupancy** (`data/raw/IIITD_occupancy_dataset/`, 10-minute): `timestamp`, `occupancy_count` = estimated people from Wi-Fi connections (max of each 10-minute window). 2014-02-16 to 2017-11-03 (Facilities from 2014-07-10). The files contain no zeros.
 
-## Occupancy: `data/raw/IIITD_occupancy_dataset/` (one CSV per building, 10-minute)
-Columns: `timestamp` (Unix seconds), `occupancy_count` (estimated people from Wi-Fi connections, max of each 10-minute window).
-Codes: ACB Academic, BH Boys dorm, DB Dining, GH Girls dorm, LB Library, LCB Lecture, SRB Facilities.
-Range 2014-02-16 to 2017-11-03 (SRB from 2014-07-10). Missing 8.0-22.5% (LCB highest).
+**Calendar** (`data/raw/iiitd_calender_schedule/`, daily): `Date`, `working_day` (1/0), `activity` (H high-activity semester, L breaks). Complete 2013-08-01 to 2017-12-31.
 
-## Calendar: `data/raw/iiitd_calender_schedule/` (one CSV per year, daily)
-Columns: `Date`, `working_day` (1 working, 0 not), `activity` (H high-activity semester, L breaks and vacations).
-Complete from 2013-08-01 to 2017-12-31.
+## Processed tables (`data/processed/`, built by `python -m nexus.data`)
+| File | One row per | Columns |
+|---|---|---|
+| energy_hourly.parquet | building and hour | `hour`, `building`, `kwh` (blank if fewer than 45 of 60 minutes recorded; a dorm is mains + UPS and blank if either is blank) |
+| occupancy_hourly.parquet | building and hour | `hour`, `building`, `occ_mean`, `occ_max`, `slots_recorded`, `slots_set_to_0` |
+| calendar.parquet | day | `date`, `working_day`, `activity` (high/low) |
 
-## Checks done (`scripts/inspect_raw.py`, 2026-10-02)
-- Power is in watts: medians match the paper's typical loads (Academic, Dining, Facilities, dorm backups).
-- The least-missing meters (Academic, Lecture, Girls UPS) match the paper.
-- No duplicate timestamps. Blank power values: 0-11 per file.
+## Decisions (from `python -m nexus.data --check`, 2026-10-02)
+1. **Use the combined power file.** It matches the separate meter files to within 0.005 W (0.048 W for Dining), which is CSV rounding.
+2. **Lecture energy is excluded from findings.** The meter reads exactly 0 W for 81.7% of recorded minutes, including 48.6% of working-day 09:00-17:00 minutes. We judge a building of nine classrooms in use is very unlikely to draw nothing, so the meter is treated as unreliable. Lecture occupancy is still used.
+3. **Spikes are kept and flagged, never silently deleted.** Minutes above twice the 99th percentile: Facilities 1,232 (max 139.4 kW vs p99 21.1 kW), Dining 67, Library 2, Boys mains 1, all others 0. They are candidates for investigation, not confirmed problems.
+4. **Zero readings outside Lecture are rare** (0.3% or less) and kept as real readings.
+5. **Assumption: a missing occupancy slot = 0 people on days the Wi-Fi system was running** (at least half the day's slots recorded). Days below that are blank. Evidence: the files never contain 0, and on running days missing slots fall between 00:00 and 06:00 about twice as often as chance (25%) in buildings that empty at night (Lecture 49%, Library 49%, Facilities 50%, Dining 46%) but not in buildings occupied at night (Academic 31%, dorms 29-32%).
 
-## Open questions (resolve before analysis)
-1. Lecture median power is 0 W; the paper says about 2 kW is typical. Real zeros or meter dropouts?
-2. Occupancy minimum is 1 everywhere, but the paper says Lecture reaches 0 at night. Missing rows may mean 0 people, not missing data.
-3. Spikes: several maximums are 7-14x the median (Facilities 139 kW, Dining 142 kW, Library 99 kW). Flag, never silently delete.
-4. Zero readings appear in most meters (power cuts?). Decide: real zero or missing.
-5. Resolution and purpose of the `all_*` and `data_present_status_*` files.
+## Still open
+- Facilities spikes: real events (e.g. window ACs) or meter glitches? Look at when they happen.
+- Transformers are not used yet.
 
 ## Limitations (shown in the app)
 - Data is from 2013-2017, not current.
 - Building level only: no rooms, schedules or capacity, so no room-utilization rates.
-- Occupancy is a Wi-Fi estimate. It overcounts people with several devices (up to ~50 in Academic, ~20 elsewhere, per the paper) and misses people not on Wi-Fi.
+- Occupancy is a Wi-Fi estimate. It overcounts people with several devices (up to about 50 in Academic, about 20 elsewhere, per the paper), misses people not on Wi-Fi, and treats some gaps as 0 (decision 5).
+- Lecture energy is unreliable (decision 2).
 - Large gaps in the dorm mains, Library and Transformer 1 meters (26-34%).
 - No tariff: we report kWh, not money, unless an assumed rate is clearly stated.
