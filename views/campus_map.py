@@ -162,9 +162,71 @@ LEGENDS = {
 LAYER_NAMES = {"unusual": "Unusual hours", "change": "vs last week", "wifi": "Wi-Fi activity"}
 
 
+# ----------------------------------------------------------------- replay
+
+REPLAY_DAYS = 84   # 12 weeks ending on the chosen date
+
+
+@st.cache_data(show_spinner="Preparing the replay ...")
+def timeline(week_end, _df, _occ, days=REPLAY_DAYS):
+    """Each matched building's colour and label for every day of the replay, per layer.
+
+    unusual: hours flagged higher or lower than usual that day.
+    change:  that day's kWh vs the median of the same weekday over the 4 weeks before.
+    wifi:    weekday daytime (09:00-17:00) people as a share of the building's usual peak.
+    """
+    end = pd.Timestamp(week_end).normalize() + pd.Timedelta(days=1)
+    start = end - pd.Timedelta(days=days)
+    dates = pd.date_range(start, end - pd.Timedelta(days=1))
+    d = _df[(_df["hour"] >= start - pd.Timedelta(days=28)) & (_df["hour"] < end)].copy()
+    d["day"] = d["hour"].dt.normalize()
+    per_day = d.groupby(["building", "day"]).agg(
+        kwh=("kwh", "sum"), hours=("kwh", "count"),
+        high=("flag", lambda f: int((f == "high").sum())), low=("flag", lambda f: int((f == "low").sum())))
+    occ = _occ.dropna(subset=["occ_mean"]) if _occ is not None else None
+    level = occ.groupby("building")["occ_mean"].quantile(0.95) if occ is not None else pd.Series(dtype=float)
+    if occ is not None:
+        o = occ[(occ["hour"] >= start) & (occ["hour"] < end)
+                & (occ["hour"].dt.dayofweek < 5) & occ["hour"].dt.hour.between(9, 16)]
+        daytime = o.groupby(["building", o["hour"].dt.normalize()])["occ_mean"].median()
+    out = {}
+    for b in sorted(d["building"].unique()):
+        if b in ENERGY_WARNINGS:
+            continue
+        unusual, change, wifi = [], [], []
+        for day in dates:
+            r = per_day.loc[(b, day)] if (b, day) in per_day.index else None
+            full = r is not None and r["hours"] >= 18
+            if not full:
+                unusual.append([NO_DATA, "Not enough meter data"])
+                change.append([NO_DATA, "Not enough meter data"])
+            else:
+                if r["high"]:
+                    unusual.append([HIGH, f"{r['high']} hour{'s' if r['high'] != 1 else ''} higher than usual"])
+                elif r["low"]:
+                    unusual.append([LOW, f"{r['low']} hour{'s' if r['low'] != 1 else ''} lower than usual"])
+                else:
+                    unusual.append([NORMAL, "Normal"])
+                same = [day - pd.Timedelta(days=7 * k) for k in range(1, 5)]
+                ref = [per_day.loc[(b, x)]["kwh"] for x in same
+                       if (b, x) in per_day.index and per_day.loc[(b, x)]["hours"] == 24]
+                if len(ref) >= 2 and r["hours"] == 24:
+                    c = r["kwh"] / pd.Series(ref).median() - 1
+                    change.append([_diverging(c), f"{c:+.0%} vs a typical {day:%A}"])
+                else:
+                    change.append([NO_DATA, "No typical day to compare"])
+            share = None
+            if occ is not None and day.dayofweek < 5 and (b, day) in daytime.index and level.get(b):
+                share = daytime.loc[(b, day)] / level[b]
+            wifi.append([_ramp(min(share, 1.0)), f"Daytime: {share:.0%} of usual peak"] if share is not None
+                        else [NO_DATA, "Weekend" if day.dayofweek >= 5 else "No Wi-Fi data"])
+        out[b] = {"unusual": unusual, "change": change, "wifi": wifi}
+    return {"labels": [f"{x:%a %-d %b %Y}" for x in dates], "buildings": out}
+
+
 # -------------------------------------------------------------------- map
 
-def payload(buildings, campus, status, week_label):
+def payload(buildings, campus, status, week_label, replay=None):
     rows = status.set_index("building").to_dict("index")
     features = []
     for f in buildings:
@@ -190,6 +252,7 @@ def payload(buildings, campus, status, week_label):
         "campus": {"type": "FeatureCollection", "features": campus},
         "layers": [{"id": k, "name": v, "legend": LEGENDS[k]} for k, v in LAYER_NAMES.items()],
         "week": week_label,
+        "timeline": replay,
     }
 
 
@@ -221,6 +284,16 @@ CSS = """
 .nx-map-root .nx-legend div { display: flex; align-items: center; gap: 8px; margin: 3px 0; }
 .nx-map-root .nx-legend i { width: 12px; height: 12px; border-radius: 3px; flex: none; }
 .nx-map-root .nx-week { right: 12px; bottom: 34px; padding: 7px 11px; font-size: 12px; color: #b9c6e4; }
+.nx-map-root .nx-replay { right: 12px; bottom: 34px; padding: 8px 10px; display: none;
+  align-items: center; gap: 10px; width: min(420px, calc(100% - 300px)); }
+.nx-map-root.nx-has-replay .nx-replay { display: flex; }
+.nx-map-root.nx-has-replay .nx-week { display: none; }
+.nx-map-root .nx-replay button { width: 34px; height: 34px; flex: none; border-radius: 50%; cursor: pointer;
+  border: 1px solid rgba(127,178,255,0.5); background: rgba(79,140,255,0.25); color: #fff;
+  font: 600 14px system-ui, sans-serif; }
+.nx-map-root .nx-replay button:focus-visible { outline: 2px solid #8ab4ff; outline-offset: 2px; }
+.nx-map-root .nx-replay input { flex: 1; min-width: 80px; accent-color: #4f8cff; }
+.nx-map-root .nx-replay span { font-size: 12px; color: #e6ecfa; white-space: nowrap; min-width: 112px; }
 .nx-map-root.nx-compact .nx-modes { flex-direction: row; flex-wrap: wrap; max-width: calc(100% - 70px); }
 .nx-map-root.nx-compact .nx-modes button { padding: 5px 8px; font-size: 12px; }
 .nx-map-root.nx-compact .nx-modes hr { display: none; }
@@ -251,6 +324,7 @@ HTML = """
   <div class="nx-panel nx-modes" role="toolbar" aria-label="Map layers"></div>
   <div class="nx-panel nx-legend" aria-live="polite"></div>
   <div class="nx-panel nx-week"></div>
+  <div class="nx-panel nx-replay" role="group" aria-label="Replay the last 12 weeks"></div>
 </div>
 """
 
@@ -331,9 +405,9 @@ function build(maplibregl, root, state, setTriggerValue) {
     map.addLayer({ id: "campus-line", type: "line", source: "campus",
       paint: { "line-color": "#8ab4ff", "line-width": 1.5, "line-dasharray": [2, 2], "line-opacity": 0.6 } });
     map.addLayer({ id: "glow", type: "line", source: "b", filter: ["!=", ["get", "nexus"], null],
-      paint: { "line-color": ["get", "color_" + state.layer], "line-width": 6, "line-blur": 6, "line-opacity": 0.85 } });
+      paint: { "line-color": colorOf(state.layer), "line-width": 6, "line-blur": 6, "line-opacity": 0.85 } });
     map.addLayer({ id: "extrude", type: "fill-extrusion", source: "b",
-      paint: { "fill-extrusion-color": ["get", "color_" + state.layer],
+      paint: { "fill-extrusion-color": colorOf(state.layer),
                "fill-extrusion-height": ["get", "height"], "fill-extrusion-opacity": 0.92,
                "fill-extrusion-vertical-gradient": true } });
     map.on("click", "extrude", e => {
@@ -373,14 +447,15 @@ function refresh(state) {
 
 function paint(state) {
   const { map, layer } = state;
-  map.setPaintProperty("extrude", "fill-extrusion-color", ["get", "color_" + layer]);
-  map.setPaintProperty("glow", "line-color", ["get", "color_" + layer]);
+  map.setPaintProperty("extrude", "fill-extrusion-color", colorOf(layer));
+  map.setPaintProperty("glow", "line-color", colorOf(layer));
   state.markers.forEach(m => m.remove());
   state.markers = state.data.features.features.filter(f => f.properties.nexus).map(f => {
     const p = f.properties, pin = document.createElement("div"), el = document.createElement("div");
     pin.className = "nx-pin"; pin.appendChild(el);
     el.className = "nx-tag"; el.style.setProperty("--c", p["color_" + layer]);
     el.innerHTML = `${p.nexus}<small>${p["label_" + layer]}</small>`;
+    el.dataset.b = p.nexus; el.dataset.osm = p.osm_id;
     el.setAttribute("role", "button"); el.tabIndex = 0;
     el.setAttribute("aria-label", `${p.nexus}: ${p["label_" + layer]}`);
     el.onclick = () => state.pick && state.pick("picked", p.nexus);
@@ -398,6 +473,50 @@ function paint(state) {
   root.querySelector(".nx-legend").innerHTML = `<h4>${L.name}</h4>` +
     L.legend.map(([c, t]) => `<div><i style="background:${c}"></i>${t}</div>`).join("");
   drawModes(root, state);
+  drawReplay(root, state);
+  if (state.day != null) showDay(state, state.day);
+}
+
+// During the replay a building's colour comes from its feature-state; otherwise from the week.
+function colorOf(layer) {
+  return ["coalesce", ["feature-state", "c"], ["get", "color_" + layer]];
+}
+
+function drawReplay(root, state) {
+  const T = state.data.timeline;
+  root.classList.toggle("nx-has-replay", !!T);
+  if (!T || root.querySelector(".nx-replay input")) return;
+  const last = T.labels.length - 1, box = root.querySelector(".nx-replay");
+  box.innerHTML = `<button type="button" aria-label="Play the last 12 weeks, one day at a time">▶</button>
+    <input type="range" min="0" max="${last}" value="${last}" aria-label="Day">
+    <span aria-live="polite">Week view</span>`;
+  const btn = box.querySelector("button"), range = box.querySelector("input");
+  const stop = () => { clearInterval(state.timer); state.timer = null; btn.textContent = "▶";
+                       btn.setAttribute("aria-label", "Play the last 12 weeks, one day at a time"); };
+  btn.onclick = () => {
+    if (state.timer) return stop();
+    let i = state.day == null || state.day >= last ? 0 : state.day + 1;
+    btn.textContent = "❚❚"; btn.setAttribute("aria-label", "Pause");
+    showDay(state, i);
+    state.timer = setInterval(() => { i += 1; if (i > last) return stop(); showDay(state, i); }, 650);
+  };
+  range.oninput = () => { stop(); showDay(state, +range.value); };
+}
+
+function showDay(state, i) {
+  const T = state.data.timeline, map = state.map, root = map.getContainer().closest(".nx-map-root");
+  state.day = i;
+  root.querySelector(".nx-replay input").value = i;
+  root.querySelector(".nx-replay span").textContent = T.labels[i];
+  state.markers.forEach(m => {
+    const el = m.getElement().firstChild, series = T.buildings[el.dataset.b];
+    if (!series) return;
+    const [color, label] = series[state.layer][i];
+    map.setFeatureState({ source: "b", id: el.dataset.osm }, { c: color });
+    el.style.setProperty("--c", color);
+    el.innerHTML = `${el.dataset.b}<small>${label}</small>`;
+  });
+  declutter(state);
 }
 
 // Stack labels that would overlap on screen: each one rises until it clears the others.

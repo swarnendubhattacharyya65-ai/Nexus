@@ -17,7 +17,7 @@ visit can take a minute to wake up).
 | Institutional Intelligence | When are buildings busy or near-empty, and do they still use energy when near-empty? | Wi-Fi occupancy estimates by hour and weekday |
 | Predictive Intelligence | How much energy will each building use over the next 14 days? | Two simple forecasts, tested on history |
 | Recommendations | What should someone check next? | Explicit rules applied to the findings above |
-| Campus Map | Where on campus is something happening this week? | Real building outlines in 3D, coloured by the week's findings |
+| Campus Map | Where on campus is something happening this week? | Real building outlines in 3D, coloured by the week's findings, with a day-by-day replay of the 12 weeks to the chosen date |
 | Reports | Can I share this week's findings? | A printable week report (HTML) and CSV downloads |
 | Ask NEXUS | Plain questions: which building needs attention, trends, next 2 weeks, savings, underused buildings | Fixed rules over NEXUS's own tables; no language model, no guessed causes |
 | Add college data | Does this work on another college? | Upload a CSV (or load the public sample); every page then runs on it |

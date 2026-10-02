@@ -80,8 +80,11 @@ def campus_page():
     df, _ = common.load()
     status = campus_map.week_status(week_end, df, common.occupancy())
     buildings, outline = campus_map.load_outlines()
+    replay = campus_map.timeline(week_end, df, common.occupancy())
     picked = campus_map.render(campus_map.payload(buildings, outline, status,
-                                                  f"Week ending {week_end:%a %-d %b %Y}"))
+                                                  f"Week ending {week_end:%a %-d %b %Y}", replay))
+    st.caption("Press ▶ on the map to replay the 12 weeks to the chosen date, one day at a time, "
+               "or drag the slider to any day. Colours follow the selected layer.")
     if picked and picked.picked:
         st.session_state["campus_picked"] = picked.picked
     campus_map.details(status, st.session_state.get("campus_picked"))
