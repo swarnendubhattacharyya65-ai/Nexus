@@ -21,8 +21,8 @@ if not (OUT / "energy_hourly.parquet").exists():
     st.error("No processed data found. In the codespace, run `python -m nexus.data` first.")
     st.stop()
 
-from views import (campus_map, common, institutional, overview, predictive,  # noqa: E402
-                   recommend, resource, upload)
+from views import (ask, campus_map, common, institutional, more, overview,  # noqa: E402
+                   predictive, recommend, resource, upload)
 from nexus.predictive import HORIZON  # noqa: E402
 
 
@@ -105,6 +105,30 @@ def data_page():
                 "the IIIT-Delhi Data & method page for details.")
 
 
+def ask_page():
+    shell.page_header("Ask NEXUS",
+                      "Questions about the selected college and week, answered from the numbers "
+                      "on the other pages.")
+    ask.show(pd.Timestamp(shell.week_end()))
+
+
+def reports_page():
+    shell.page_header("Reports", "Download the chosen week as a report you can print or share, "
+                      "and the full tables behind it.")
+    more.reports(pd.Timestamp(shell.week_end()))
+
+
+def settings_page():
+    shell.page_header("Settings", "Your tariff and carbon factor, and the thresholds behind every "
+                      "finding.")
+    more.settings()
+
+
+def help_page():
+    shell.page_header("Help", "Plain answers to the questions people ask most.")
+    more.help_page()
+
+
 def upload_page():
     shell.page_header("Add college data",
                       "Run the same analyses on another college: upload its meter readings, "
@@ -128,13 +152,18 @@ PAGES = {
                     url_path="data"),
     "upload": st.Page(upload_page, title="Add college data", icon=":material/upload_file:",
                       url_path="add-college"),
+    "ask": st.Page(ask_page, title="Ask NEXUS", icon=":material/forum:", url_path="ask"),
+    "reports": st.Page(reports_page, title="Reports", icon=":material/summarize:", url_path="reports"),
+    "settings": st.Page(settings_page, title="Settings", icon=":material/settings:", url_path="settings"),
+    "help": st.Page(help_page, title="Help", icon=":material/help:", url_path="help"),
 }
 
 page = st.navigation({
     "Intelligence": [PAGES[k] for k in ["overview", "resource", "institutional", "predictive",
-                                        "recommendations"]],
-    "Campus": [PAGES["campus"]],
+                                        "recommendations", "campus", "reports"]],
+    "Assistant": [PAGES["ask"]],
     "Data": [PAGES["upload"], PAGES["data"]],
+    "More": [PAGES["settings"], PAGES["help"]],
 })
 
 # A search result was picked: go to its page (state was set by the button callback).

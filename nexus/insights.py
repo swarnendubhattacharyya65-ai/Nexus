@@ -7,7 +7,7 @@ and institutional.py already do.
 import pandas as pd
 
 from nexus.institutional import BUSY, BUSY_LEVEL, QUIET
-from nexus.kpis import HOURS_PER_WEEK, window
+from nexus.kpis import HOURS_PER_WEEK, compare, window
 from nexus.predictive import HORIZON, forecast
 
 TREND_DAYS = 30
@@ -123,3 +123,20 @@ def feed(events, df, recs, week_end, forecast_change=None, limit=6):
         items.append({"kind": "pattern" if r.rule == "R3" else "caution", "title": r.building,
                       "text": r.finding, "when": "Across the data"})
     return items[:limit]
+
+
+def building_week(df, week_end):
+    """One row per building for the chosen week: kWh, change, flagged and missing hours."""
+    start, end = window(week_end)
+    analysed = df[df["flag"] != "unreliable meter"]
+    w = analysed[(analysed["hour"] >= start) & (analysed["hour"] < end)]
+    change = compare(analysed[["hour", "building", "kwh"]], "kwh", week_end)["per_building"]
+    t = w.groupby("building").agg(kwh=("kwh", "sum"), recorded=("kwh", "count"),
+                                  high=("flag", lambda f: int((f == "high").sum())),
+                                  low=("flag", lambda f: int((f == "low").sum())))
+    t = t.join(change.set_index("building")[["change"]])
+    return pd.DataFrame({
+        "Building": t.index, "kWh this week": t["kwh"].round().to_numpy(),
+        "vs week before %": (t["change"] * 100).round(1).to_numpy(),
+        "Hours higher than usual": t["high"].to_numpy(), "Hours lower than usual": t["low"].to_numpy(),
+        "Hours without data": (HOURS_PER_WEEK - t["recorded"]).to_numpy()})

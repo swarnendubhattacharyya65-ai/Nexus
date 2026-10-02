@@ -220,9 +220,9 @@ def _panels(df, events, ds, week_end, fc, skipped, change):
             if change is not None:
                 bits.append(f"Forecast {change:+.0%} vs the 14 days before.")
             if fc["actual"].notna().any():
-                bits.append("Actual shown where the data has it.")
+                bits.append("Actual shown on days with complete meter data.")
             else:
-                bits.append("These days are after the end of the data, so there is no actual yet.")
+                bits.append("No complete meter data for these days yet, so no actual to compare.")
             if skipped:
                 bits.append(f"Not included: {', '.join(skipped)}.")
             st.caption(" ".join(bits) + " Sum of each building's forecast; see Predictive Intelligence.")

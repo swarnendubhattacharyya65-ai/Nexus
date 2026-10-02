@@ -18,7 +18,10 @@ visit can take a minute to wake up).
 | Predictive Intelligence | How much energy will each building use over the next 14 days? | Two simple forecasts, tested on history |
 | Recommendations | What should someone check next? | Explicit rules applied to the findings above |
 | Campus Map | Where on campus is something happening this week? | Real building outlines in 3D, coloured by the week's findings |
+| Reports | Can I share this week's findings? | A printable week report (HTML) and CSV downloads |
+| Ask NEXUS | Plain questions: which building needs attention, trends, next 2 weeks, savings, underused buildings | Fixed rules over NEXUS's own tables; no language model, no guessed causes |
 | Add college data | Does this work on another college? | Upload a CSV (or load the public sample); every page then runs on it |
+| Settings, Help | Tariff and carbon factor for ₹ and CO₂; plain answers | Your figures, shown next to every result they produce |
 | Data & method | Where the data comes from and every cleaning decision | Shows `DATA.md`, or the import checks for an uploaded college |
 
 Every number is calculated by the code in `nexus/`, not typed in. Where there is not
@@ -81,6 +84,9 @@ nexus/institutional.py   Occupancy patterns and energy when near-empty
 nexus/predictive.py      Forecasts and backtest
 nexus/recommend.py       Recommendation rules R1-R5
 nexus/kpis.py            Week-on-week cards and the Overview headline
+nexus/insights.py        Overview panels: insights feed, 30-day trend, building hours, 2-week outlook
+nexus/ask.py             Ask NEXUS: question routing and rule-based answers
+nexus/dataset.py         One college's data; nexus/importer.py turns an uploaded CSV into one
 scripts/                 Raw data summary, logo generator
 static/                  Logo and self-hosted fonts (SIL Open Font License)
 .streamlit/config.toml   Theme: colours, fonts
