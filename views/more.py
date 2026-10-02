@@ -158,6 +158,21 @@ HELP = [
     ("Where do the map's buildings come from?",
      "OpenStreetMap outlines of today's campus. Five I-BLEND buildings are matched (four by name, "
      "Dining by use); Lecture and Facilities are not identified there, so they are left off."),
+    ("How does searching for a college work?",
+     "Type its name in the College box. NEXUS checks its own list of vetted datasets, then searches "
+     "Zenodo, Figshare and Harvard Dataverse for records that name the college and mention "
+     "electricity or energy. It only downloads files under an open licence, and only analyses a "
+     "CSV with a clear time column and energy columns labelled kWh, kW or W. If nothing qualifies "
+     "it says 'College data unavailable'. That means none was found in those sources, not that "
+     "none exists. Colleges rarely publish meter data, so this is common."),
+    ("Where does the map come from for other colleges?",
+     "OpenStreetMap: the college is looked up by name and its buildings are drawn in 3D. A meter "
+     "building is placed on the map only when its name matches exactly one outline; the rest are "
+     "listed as not placed."),
+    ("What does the conversation send to the AI?",
+     "Your questions, and the NEXUS numbers the assistant looks up to answer them (for example a "
+     "week's building table), go to Anthropic's API. The raw data files are never sent. Without an "
+     "API key the Quick answers tab still works, using fixed rules only."),
     ("Is uploaded data stored?",
      "It is sent to the NEXUS server and kept in its memory for your session only. It is not "
      "written to disk or shown to other visitors, and it is cleared when you reload or close "

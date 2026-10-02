@@ -4,8 +4,8 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from nexus import importer
-from views import common
+from nexus import finder, importer, place
+from views import campus_map, common
 
 SAMPLE = Path("data/samples/bdg2_fox_8_buildings.csv.gz")
 SAMPLE_NAME = "Sample: BDG2 site Fox, USA"
@@ -86,7 +86,109 @@ def report_view(report):
         hide_index=True)
 
 
+# ------------------------------------------------------------ search by college name
+
+def _look_up_map(name, found):
+    """The campus on the map (OpenStreetMap), if it can be found. Never blocks the rest."""
+    pl = outlines = None
+    error = ""
+    try:
+        pl = place.geocode(name)
+        outlines = place.campus(pl) if pl else None
+    except place.Unreachable as e:
+        error = str(e)
+    return pl, outlines, error
+
+
+def find(typed):
+    """Search for a college typed in the College box, register what happened and select it.
+
+    Called from the top bar; ends with a rerun so every page then shows the new college.
+    """
+    from views.shell import _college_changed
+    name = " ".join(typed.split())
+    with st.spinner(f"Searching public sources for “{name}” ..."):
+        res = finder.search(name)
+        if res.get("registry") == "iiitd":
+            target = common.IIITD
+        elif res.get("registry") == "sample":
+            target = SAMPLE_NAME
+            if target not in common.colleges():
+                _load_sample()
+        else:
+            pl, outlines, err = _look_up_map(name, res["status"] == "found")
+            extra = {"place": pl, "outlines": outlines, "map_error": err, "search": res}
+            target = name
+            if res["status"] == "found":
+                common.uploads()[name] = {"dataset": res["dataset"], "report": res["report"], **extra}
+            else:
+                common.unavailable()[name] = extra
+    st.session_state["_select"] = target
+    _college_changed()
+    st.rerun()
+
+
+def unavailable_view():
+    """Shown for a searched college with no usable public data: say so, show what was checked."""
+    name = common.college()
+    entry = common.unavailable()[name]
+    res = entry["search"]
+    if res["status"] == "unreachable":
+        st.warning(f"**Could not search right now.** NEXUS could not reach the public data sources "
+                   f"for “{name}”, so it does not know whether data exists. Check the connection "
+                   "and search again.", icon=":material/wifi_off:")
+        with st.expander("What failed"):
+            st.write(res["failed"])
+    else:
+        st.error(f"**College data unavailable.** NEXUS searched {', '.join(res['checked'])} for "
+                 f"“{name}” and found no public electricity or energy data it can analyse.",
+                 icon=":material/search_off:")
+        st.caption("This does not mean the college has no meter data, only that none is published "
+                   "in these sources under an open licence. Its own staff can add it with a CSV.")
+    if res["failed"] and res["status"] != "unreachable":
+        st.caption("Could not be searched this time: " + ", ".join(res["failed"]) + ".")
+    if res["candidates"]:
+        st.subheader("Related records NEXUS looked at")
+        for c in res["candidates"]:
+            st.markdown(f"- [{c['title']}]({c['url']}) ({c['source']}, licence: {c['licence']}): {c['why']}.")
+    if res["tried"]:
+        with st.expander("Files NEXUS tried and why they could not be used"):
+            st.write(res["tried"])
+    c1, c2 = st.columns(2)
+    c1.button("Search again", icon=":material/refresh:", on_click=_forget, args=(name, True))
+    c2.button("Add this college's own CSV", icon=":material/upload_file:",
+              on_click=lambda: st.session_state.update(_goto="upload"))
+
+    geo = common.geo()
+    if geo:
+        buildings, _, pl = geo
+        st.subheader(f"{pl['name'] if pl else name} on the map")
+        data = campus_map.payload(buildings, [], pd.DataFrame({"building": []}),
+                                  f"{name}: no energy data", None, view=name, place=pl)
+        campus_map.render(data, height=520, key="unavailable_map")
+        st.caption(f"{len(buildings)} buildings from OpenStreetMap (ODbL). They are drawn as not "
+                   "metered because there is no energy data to show on them.")
+    elif entry.get("map_error"):
+        st.caption(f"The campus could not be placed on the map right now ({entry['map_error']}).")
+    else:
+        st.caption("The campus could not be identified on the map (no university or college of "
+                   "that name was found in OpenStreetMap).")
+
+
+def _forget(name, retry=False):
+    common.unavailable().pop(name, None)
+    st.session_state["college"] = common.IIITD
+    from views.shell import _college_changed
+    _college_changed()
+    if retry:
+        st.session_state["_search_again"] = name
+
+
 def show():
+    st.info("**Looking for a college's public data?** Type its name in the **College** box at the "
+            "top of any page. NEXUS searches Zenodo, Figshare and Harvard Dataverse, analyses what "
+            "it can read with certainty, and says **College data unavailable** otherwise. Use this "
+            "page when you have the college's own file.", icon=":material/search:")
     st.markdown("Run NEXUS on another college's meter data. Uploaded files are sent to the NEXUS "
                 "server and kept in its memory for your session only: they are not written to "
                 "disk or shown to other visitors, and reloading the page clears them.")

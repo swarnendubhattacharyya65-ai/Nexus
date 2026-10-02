@@ -120,14 +120,16 @@ def _feed_html(items):
 
 def _map_and_feed(df, events, recs, ds, week_end, forecast_change):
     items = insights.feed(events, df, recs, week_end, forecast_change)
-    if ds.has_map and campus_map.outlines_ready():
+    geo = common.geo()
+    if geo:
+        buildings, outline, pl = geo
         left, right = st.container(key="mapfeed").columns([1.7, 1], gap="medium")
         with left:
             st.subheader("Campus this week")
-            status = campus_map.week_status(pd.Timestamp(week_end), df, ds.occupancy)
-            buildings, outline = campus_map.load_outlines()
+            status = campus_map.week_status(pd.Timestamp(week_end), df, ds.occupancy, ds.name, ds.warnings)
             picked = campus_map.render(
-                campus_map.payload(buildings, outline, status, f"Week ending {week_end:%a %-d %b %Y}"),
+                campus_map.payload(buildings, outline, status, f"Week ending {week_end:%a %-d %b %Y}",
+                                   view=ds.name, place=pl),
                 height=540, key="overview_map")
             if picked and picked.picked:   # a tapped building opens on the Campus Map page
                 st.session_state["campus_picked"] = picked.picked

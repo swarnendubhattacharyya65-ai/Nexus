@@ -50,6 +50,18 @@ def day_types(ds=None):
     return pd.Series(kind, index=cal["date"])
 
 
+def extend_types(types, days=HORIZON + 7):
+    """Day types for dates after the calendar ends: Saturdays and Sundays only.
+
+    A weekday after the calendar ends could be a term day, a break day or a holiday, and
+    that is not known, so it is left out and the calendar method uses the simple rule for it.
+    """
+    last = types.index.max()
+    future = pd.date_range(last + pd.Timedelta(days=1), periods=days)
+    known = pd.Series(np.where(future.dayofweek == 5, "Saturday", "Sunday or holiday"), index=future)
+    return pd.concat([types, known[future.dayofweek >= 5]])
+
+
 class _History:
     """One building's past days as sorted arrays, so forecasts are fast."""
 
@@ -94,6 +106,25 @@ def forecast(series, types, origin):
     days, kinds, naive, calendar, actual = _History(series, types).forecast(origin)
     return pd.DataFrame({"date": days, "day_type": kinds, "naive": naive,
                          "calendar": calendar, "actual": actual})
+
+
+def next_forecasts(daily, types, ev):
+    """The next HORIZON days per usable building, starting the day after its last complete day."""
+    rows = []
+    for r in ev[ev["note"] == ""].itertuples():
+        s = daily[daily["building"] == r.building].set_index("date")["kwh"].sort_index()
+        origin = s.index.max() + pd.Timedelta(days=1)
+        f = forecast(s, types, origin)
+        f["forecast"] = f[r.method]
+        recent = s[s.index >= origin - pd.Timedelta(days=HORIZON)]
+        complete = not f["forecast"].isna().any()
+        rows.append({"building": r.building, "forecast_from": origin, "days": HORIZON,
+                     "forecast_kwh_total": f["forecast"].sum() if complete else None,
+                     "last_14_recorded_days_kwh": recent.sum() if len(recent) == HORIZON else None,
+                     "method": METHODS[r.method], "typical_miss_pct_of_a_day": round(r.error_pct * 100, 1),
+                     "range_80pct_per_day": f"{r.band_low:+.0%} to {r.band_high:+.0%} of the forecast",
+                     "note": "" if complete else "incomplete: some days could not be forecast"})
+    return pd.DataFrame(rows)
 
 
 def backtest(daily, types):

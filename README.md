@@ -15,12 +15,13 @@ visit can take a minute to wake up).
 | Overview | How did the chosen week compare with the week before? What is happening, what might happen next, what to check | Hour-for-hour week comparison, plus a summary of the pages below |
 | Resource Intelligence | Which hours used unusually more or less energy than normal? | Each hour vs a baseline of comparable hours |
 | Institutional Intelligence | When are buildings busy or near-empty, and do they still use energy when near-empty? | Wi-Fi occupancy estimates by hour and weekday |
-| Predictive Intelligence | How much energy will each building use over the next 14 days? | Two simple forecasts, tested on history |
+| Predictive Intelligence | How much energy will each building use over the 14 days after the data ends? | Two simple forecasts, tested on history (the test is in an expander, not the chart) |
 | Recommendations | What should someone check next? | Explicit rules applied to the findings above |
 | Campus Map | Where on campus is something happening this week? | Real building outlines in 3D, coloured by the week's findings, with a day-by-day replay of the 12 weeks to the chosen date |
 | Reports | Can I share this week's findings? | A printable week report (HTML) and CSV downloads |
-| Ask NEXUS | Plain questions: which building needs attention, trends, next 2 weeks, savings, underused buildings | Fixed rules over NEXUS's own tables; no language model, no guessed causes |
-| Add college data | Does this work on another college? | Upload a CSV (or load the public sample); every page then runs on it |
+| Ask NEXUS | Any question, in a continuing conversation | Claude, with lookup tools over NEXUS's own tables (needs an API key); a no-AI "Quick answers" tab uses fixed rules |
+| College box (top of every page) | Does this college publish energy data? | Type a name: NEXUS searches public repositories, analyses what it can read, else says "College data unavailable"; the map moves to that campus |
+| Add college data | I have the college's own file | Upload a CSV (or load the public sample); every page then runs on it |
 | Settings, Help | Tariff and carbon factor for ₹ and CO₂; plain answers | Your figures, shown next to every result they produce |
 | Data & method | Where the data comes from and every cleaning decision | Shows `DATA.md`, or the import checks for an uploaded college |
 
@@ -85,7 +86,11 @@ nexus/predictive.py      Forecasts and backtest
 nexus/recommend.py       Recommendation rules R1-R5
 nexus/kpis.py            Week-on-week cards and the Overview headline
 nexus/insights.py        Overview panels: insights feed, 30-day trend, building hours, 2-week outlook
-nexus/ask.py             Ask NEXUS: question routing and rule-based answers
+nexus/ask.py             Quick answers: question routing and rule-based answers
+nexus/chat.py            Conversation: Claude plus lookup tools over NEXUS's tables
+nexus/finder.py          College search: vetted list, Zenodo, Figshare, Harvard Dataverse
+nexus/place.py           College on the map: OpenStreetMap lookup and building outlines
+tests/                   Offline tests for search, place lookup and the chat loop
 nexus/dataset.py         One college's data; nexus/importer.py turns an uploaded CSV into one
 scripts/                 Raw data summary, logo generator
 static/                  Logo and self-hosted fonts (SIL Open Font License)
@@ -119,6 +124,13 @@ All thresholds are named constants at the top of each file in `nexus/`.
 - **Recommendations:** five explicit rules (R1-R5), each shown in the app with its
   threshold, the finding that triggered it and the evidence.
 
+## Chatbot setup
+The conversation needs an Anthropic API key. On Streamlit Cloud: Manage app, Settings,
+Secrets, then add `ANTHROPIC_API_KEY = "sk-ant-..."` (optionally `ANTHROPIC_MODEL`). Never put
+the key in GitHub. A public link lets anyone spend your credit, so set a monthly spend limit
+for the key in the Anthropic Console; the app also stops after 30 questions per session.
+Without a key the Quick answers tab still works.
+
 ## Other colleges
 `Add college data` takes one CSV of meter readings (`timestamp`, `building`, and one of
 `kwh`, `kw` or `w`; optional `people`) and an optional calendar. `nexus/importer.py`
@@ -128,6 +140,14 @@ that visitor's session only; they are not written to disk or shown to other visi
 
 A public sample is included: 8 buildings from site Fox of the Building Data Genome
 Project 2 (a US university campus, 2016-2017, CC BY-SA 4.0); see `data/samples/README.md`.
+
+### Searching by name: what to expect
+Search is best effort. Few colleges publish meter data, so "College data unavailable" is a
+normal, honest answer. It means nothing usable was found in Zenodo, Figshare or Harvard
+Dataverse under an open licence, not that none exists. A search that could not reach the
+repositories says so separately ("Could not search right now"). Data found online is labelled
+with its record and licence and is never presented as PES data. Run the offline tests with
+`python tests/test_finder.py` and `python tests/test_chat.py`.
 
 ## Data
 I-BLEND, IIIT-Delhi. Rashid, H., Singh, P. & Singh, A. (2019). *Scientific Data* 6,
@@ -151,8 +171,9 @@ cleaning decision and its evidence.
 - **Forecasts have no weather input**, and in at least one building the calendar
   method did not beat the simple rule on 2017. The app says which, rather than switching methods
   after seeing the test year.
-- **The data ends in 2017.** Forecasts can only be checked against history, not used
-  for the coming weeks.
+- **The data ends in 2017.** The forecast starts the day after the data ends (1 Jan 2018 for
+  IIIT-Delhi), so it is not a prediction for today. Weekdays after the calendar ends are not
+  known to be term days or holidays, so the calendar method uses the simple rule for them.
 - **No tariff in the data.** Rupees appear only from a tariff you enter in Settings; the
   savings answer in Ask NEXUS is a what-if with a reduction you choose, not a forecast.
 - **First load is slow on free hosting.** The app calculates baselines and the forecast

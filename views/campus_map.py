@@ -11,7 +11,6 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from nexus.data import ENERGY_WARNINGS, OUT
 from nexus.kpis import HOURS_PER_WEEK, compare, window
 
 CAMPUS = Path(os.environ.get("NEXUS_CAMPUS_DIR", "data/campus"))
@@ -75,18 +74,21 @@ def _centroid(ring):
 # ----------------------------------------------------------------- status
 
 @st.cache_data(show_spinner="Reading the week for each building ...")
-def week_status(week_end, _df, _occ):
-    """One row per I-BLEND building: what the map shows for the chosen week."""
+def week_status(week_end, _df, _occ, college, _warnings):
+    """One row per metered building: what the map shows for the chosen week. `college` keys the cache."""
     start, end = window(week_end)
     w = _df[(_df["hour"] >= start) & (_df["hour"] < end)]
     energy = _df[["hour", "building", "kwh"]]
     change = compare(energy, "kwh", week_end)["per_building"].set_index("building")
 
-    occ = _occ.dropna(subset=["occ_mean"])
-    busy_level = occ.groupby("building")["occ_mean"].quantile(0.95)
-    ow = occ[(occ["hour"] >= start) & (occ["hour"] < end)]
-    day = ow[(ow["hour"].dt.dayofweek < 5) & ow["hour"].dt.hour.between(9, 16)]
-    daytime = day.groupby("building")["occ_mean"].median()
+    if _occ is not None and not _occ.empty:
+        occ = _occ.dropna(subset=["occ_mean"])
+        busy_level = occ.groupby("building")["occ_mean"].quantile(0.95)
+        ow = occ[(occ["hour"] >= start) & (occ["hour"] < end)]
+        day = ow[(ow["hour"].dt.dayofweek < 5) & ow["hour"].dt.hour.between(9, 16)]
+        daytime = day.groupby("building")["occ_mean"].median()
+    else:
+        busy_level, daytime = pd.Series(dtype=float), pd.Series(dtype=float)
 
     rows = []
     for b in sorted(_df["building"].unique()):
@@ -94,12 +96,12 @@ def week_status(week_end, _df, _occ):
         recorded = int(g["kwh"].notna().sum())
         rows.append({
             "building": b,
-            "unreliable": b in ENERGY_WARNINGS,
+            "unreliable": b in _warnings,
             "hours_recorded": recorded,
-            "kwh": g["kwh"].sum() if recorded and b not in ENERGY_WARNINGS else None,
+            "kwh": g["kwh"].sum() if recorded and b not in _warnings else None,
             "high_hours": int((g["flag"] == "high").sum()),
             "low_hours": int((g["flag"] == "low").sum()),
-            "change": change["change"].get(b) if b not in ENERGY_WARNINGS else None,
+            "change": change["change"].get(b) if b not in _warnings else None,
             "wifi_daytime": daytime.get(b),
             "wifi_share": daytime.get(b) / busy_level.get(b) if b in daytime and busy_level.get(b) else None,
         })
@@ -174,7 +176,7 @@ REPLAY_DAYS = 84   # 12 weeks ending on the chosen date
 
 
 @st.cache_data(show_spinner="Preparing the replay ...")
-def timeline(week_end, _df, _occ, days=REPLAY_DAYS):
+def timeline(week_end, _df, _occ, college, _warnings, days=REPLAY_DAYS):
     """Each matched building's colour and label for every day of the replay, per layer.
 
     unusual: hours flagged higher or lower than usual that day.
@@ -197,7 +199,7 @@ def timeline(week_end, _df, _occ, days=REPLAY_DAYS):
         daytime = o.groupby(["building", o["hour"].dt.normalize()])["occ_mean"].median()
     out = {}
     for b in sorted(d["building"].unique()):
-        if b in ENERGY_WARNINGS:
+        if b in _warnings:
             continue
         unusual, change, wifi = [], [], []
         for day in dates:
@@ -232,7 +234,7 @@ def timeline(week_end, _df, _occ, days=REPLAY_DAYS):
 
 # -------------------------------------------------------------------- map
 
-def payload(buildings, campus, status, week_label, replay=None):
+def payload(buildings, campus, status, week_label, replay=None, view="iiitd", place=None):
     rows = status.set_index("building").to_dict("index")
     features = []
     for f in buildings:
@@ -246,12 +248,18 @@ def payload(buildings, campus, status, week_label, replay=None):
                 p[f"color_{layer}"], p[f"label_{layer}"] = OTHER, ""
         features.append({**f, "properties": p})
     matched = [f["properties"]["center"] for f in features if f["properties"]["nexus"]]
-    center = ([sum(c[0] for c in matched) / len(matched), sum(c[1] for c in matched) / len(matched)]
-              if matched else [77.2725, 28.54444])
     pts = [c for f in features if f["properties"]["nexus"] for c in f["geometry"]["coordinates"][0]]
-    bounds = ([[min(c[0] for c in pts), min(c[1] for c in pts)],
-               [max(c[0] for c in pts), max(c[1] for c in pts)]] if pts else None)
+    if matched:
+        center = [sum(c[0] for c in matched) / len(matched), sum(c[1] for c in matched) / len(matched)]
+        bounds = [[min(c[0] for c in pts), min(c[1] for c in pts)],
+                  [max(c[0] for c in pts), max(c[1] for c in pts)]]
+    elif place:   # nothing placed with certainty: frame the whole campus instead
+        s_, w_, n_, e_ = place["bbox"]
+        center, bounds = [place["lon"], place["lat"]], [[w_, s_], [e_, n_]]
+    else:
+        center, bounds = [77.2725, 28.54444], None
     return {
+        "view": view,
         "center": center,
         "bounds": bounds,
         "features": {"type": "FeatureCollection", "features": features},
@@ -424,15 +432,8 @@ function build(maplibregl, root, state, setTriggerValue) {
     map.on("mouseenter", "extrude", () => map.getCanvas().style.cursor = "pointer");
     map.on("mouseleave", "extrude", () => map.getCanvas().style.cursor = "");
     state.pick = setTriggerValue;
-    if (state.data.bounds) {
-      // Frame the metered buildings; looking west puts the campus's long north-south axis across the screen.
-      const box = root.getBoundingClientRect(), compact = state.data.height < 560;
-      map.fitBounds(state.data.bounds, {
-        padding: { top: Math.round(box.height * (compact ? 0.3 : 0.2)), bottom: Math.round(box.height * 0.14),
-                   left: Math.round(compact ? box.width * 0.16 : 190),
-                   right: Math.round(box.width * (compact ? 0.16 : 0.08)) },
-        bearing: -78, pitch: 55, duration: 0, maxZoom: 17.2 });
-    }
+    state.view = state.data.view;
+    fit(state, 0);
     paint(state);
     if (!still) {
       map.easeTo({ bearing: map.getBearing() + 40, duration: 16000, easing: t => t });
@@ -445,10 +446,26 @@ function build(maplibregl, root, state, setTriggerValue) {
   drawModes(root, state);
 }
 
+// Frame the metered buildings; looking west puts the campus's long north-south axis across the screen.
+function fit(state, duration) {
+  const map = state.map, root = map.getContainer().closest(".nx-map-root");
+  if (!state.data.bounds) { map.jumpTo({ center: state.data.center }); return; }
+  const box = root.getBoundingClientRect(), compact = state.data.height < 560;
+  map.fitBounds(state.data.bounds, {
+    padding: { top: Math.round(box.height * (compact ? 0.3 : 0.2)), bottom: Math.round(box.height * 0.14),
+               left: Math.round(compact ? box.width * 0.16 : 190),
+               right: Math.round(box.width * (compact ? 0.16 : 0.08)) },
+    bearing: -78, pitch: 55, duration, maxZoom: 17.2 });
+}
+
 function refresh(state) {
   if (!state.ready) return;
   state.map.getSource("b").setData(state.data.features);
   state.map.getSource("campus").setData(state.data.campus);
+  if (state.view !== state.data.view) {   // a different college: fly there
+    state.view = state.data.view; state.day = null;
+    fit(state, 2200);
+  }
   paint(state);
 }
 
@@ -576,12 +593,12 @@ _MAP = st.components.v2.component("nexus_campus_map", html=HTML, css=CSS, js=JS,
 
 
 def status_table(status):
-    """The numbers behind the map, one row per I-BLEND building."""
-    t = status.assign(
-        kwh=status["kwh"].round(),
-        change=(status["change"] * 100).round(1),
-        wifi_share=(status["wifi_share"] * 100).round(),
-        wifi_daytime=status["wifi_daytime"].round())
+    """The numbers behind the map, one row per metered building."""
+    num = lambda c: pd.to_numeric(status[c], errors="coerce")   # noqa: E731  (all-blank columns are object)
+    t = status.assign(kwh=num("kwh").round(), change=(num("change") * 100).round(1),
+                      wifi_share=(num("wifi_share") * 100).round(), wifi_daytime=num("wifi_daytime").round())
+    if t["wifi_share"].isna().all():
+        t = t.drop(columns=["wifi_share", "wifi_daytime"])
     st.dataframe(t.rename(columns={
         "building": "Building", "hours_recorded": "Hours recorded (of 168)", "kwh": "kWh",
         "change": "vs last week %", "high_hours": "Hours higher than usual",
@@ -589,8 +606,8 @@ def status_table(status):
         "wifi_share": "% of usual peak"}).drop(columns=["unreliable"]),
         hide_index=True)
     st.caption("vs last week compares the same hours in both weeks. Weekday daytime is "
-               "Monday-Friday 09:00-17:00; usual peak is the building's 95th-percentile hour "
-               "over 2014-2017. Heights come from OpenStreetMap floors where recorded, "
+               "Monday-Friday 09:00-17:00; usual peak is the building's 95th-percentile hour. "
+               "Heights come from OpenStreetMap floors where recorded, "
                f"otherwise {DEFAULT_M:.0f} m.")
 
 
@@ -617,8 +634,20 @@ def details(status, picked):
                       on_click=_go, args=("resource", {"res_building": picked}))
 
 
-def matching_notes(status):
-    """How each I-BLEND building was placed on the map, and which ones could not be."""
+def matching_notes(status, is_iiitd, buildings=()):
+    """How each metered building was placed on the map, and which ones could not be."""
+    if not is_iiitd:
+        placed = {f["properties"]["nexus"]: f["properties"]["osm_name"]
+                  for f in buildings if f["properties"]["nexus"]}
+        missing = sorted(set(status["building"]) - set(placed))
+        if placed:
+            st.caption("Placed on the map by name: "
+                       + ", ".join(f"{b} (as “{o}”)" for b, o in placed.items()) + ".")
+        if missing:
+            st.caption(f"Not placed on the map: {', '.join(missing)}. Their names do not match one "
+                       "OpenStreetMap building unambiguously, so NEXUS does not guess. Their numbers "
+                       "are in the table above.")
+        return
     m = matches()
     missing = sorted(set(status["building"]) - set(m["nexus_building"]))
     if missing:

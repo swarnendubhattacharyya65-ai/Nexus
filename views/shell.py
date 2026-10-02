@@ -133,23 +133,42 @@ def _college_changed():
 
 
 def top_bar():
-    """College, week and search controls shared by every page."""
+    """College, week and search controls shared by every page.
+
+    The College box takes a typed name: a name that is not in the list starts a search for
+    that college's public data. Returns False when the selected college has no data.
+    """
+    from views import upload
+
+    ss = st.session_state
+    if "_select" in ss:                      # a search just finished: select its result
+        ss["college"] = ss.pop("_select")
+    if "_search_again" in ss:
+        upload.find(ss.pop("_search_again"))
     names = common.colleges()
-    if st.session_state.get("college") not in names:
-        st.session_state["college"] = names[0]
+    ss.setdefault("college", names[0])
     c1, c2, c3, c4 = st.container(key="topbar").columns([1.5, 1.1, 2.2, 1.5],
                                                          vertical_alignment="bottom")
-    c1.selectbox("College", names, key="college", on_change=_college_changed)
+    c1.selectbox("College", names, key="college", on_change=_college_changed,
+                 accept_new_options=True, placeholder="Type a college name",
+                 help="Pick a college, or type any college's name: NEXUS searches public sources "
+                      "for its energy data and moves the map to its campus.")
+    if ss["college"] not in names:
+        upload.find(ss["college"])           # searches, then reruns with the result selected
+    if common.is_unavailable():
+        with c4:
+            st.html('<div class="nx-notice"><span><b>College data unavailable</b></span></div>')
+        return False
 
     ds = common.dataset()
     last = common.last_full_day().date()
     latest = ds.last.date()
     first = min((ds.first + pd.Timedelta(days=14)).date(), latest)
     key = week_key()
-    chosen = st.session_state.get(key)
+    chosen = ss.get(key)
     if chosen is not None and not first <= chosen <= latest:
-        st.session_state.pop(key)
-    default = {} if key in st.session_state else {"value": last}
+        ss.pop(key)
+    default = {} if key in ss else {"value": last}
     c2.date_input("Week ending", min_value=first, max_value=latest, key=key,
                   format="DD/MM/YYYY", **default,
                   help="The Overview compares the 7 days ending on this date with the 7 days "
@@ -161,6 +180,7 @@ def top_bar():
         notice(ds)
     if query.strip():
         _results(query.strip())
+    return True
 
 
 def _go(page, state=None):

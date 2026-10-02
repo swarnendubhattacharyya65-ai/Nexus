@@ -1,7 +1,13 @@
-"""Ask NEXUS: suggested questions and typed questions, answered from NEXUS's own numbers."""
+"""Ask NEXUS: a conversation with Claude that looks numbers up in NEXUS's own tables, plus
+fixed-rule quick answers that need no API key."""
+import os
+
+import pandas as pd
 import streamlit as st
 
-from nexus import ask, insights
+from nexus import ask, chat, insights
+from nexus.kpis import headline
+from nexus.predictive import next_forecasts
 from views import common
 
 
@@ -56,7 +62,7 @@ def _answer(item, week_end, i):
         return ask.underused(summary, common.dataset().has_calendar)
 
 
-def show(week_end):
+def quick_answers(week_end):
     st.info("Ask NEXUS answers from the numbers on the other pages, using fixed rules. It does "
             "not use a language model and it does not guess causes.", icon=":material/info:")
 
@@ -88,3 +94,133 @@ def show(week_end):
         st.button("Clear the conversation", type="tertiary",
                   on_click=lambda: st.session_state["ask_history"].pop(common.college(), None))
     st.chat_input("Ask about this college's energy and buildings", key="ask_text", on_submit=_typed)
+
+
+# ------------------------------------------------------------------ the conversation
+
+MAX_QUESTIONS = 30   # per session, so a public link cannot run up the API bill
+SUGGESTED = ["Which building needs attention this week?", "How is electricity trending?",
+             "What does the next two weeks look like?", "Where could this college save energy?",
+             "How does NEXUS decide an hour is unusual?"]
+
+
+def api_key():
+    try:
+        key = st.secrets.get("ANTHROPIC_API_KEY")
+    except Exception:   # no secrets file at all
+        key = None
+    return key or os.environ.get("ANTHROPIC_API_KEY")
+
+
+def _context(week_end):
+    ds = common.dataset()
+    df, events = common.load()
+    week_end = pd.Timestamp(week_end)
+
+    def overview():
+        return {"college": ds.name, "source": ds.source,
+                "data_from": ds.first, "data_to": ds.last,
+                "buildings": sorted(df["building"].unique()),
+                "unreliable_energy_meters": ds.warnings,
+                "has_wifi_occupancy": ds.occupancy is not None,
+                "has_academic_calendar": ds.has_calendar, "notes": ds.notes}
+
+    def snapshot():
+        snap = common.week(week_end)
+        h = headline(snap)
+        keep = lambda c: {k: c[k] for k in ("this", "prev", "change", "coverage")}   # noqa: E731
+        return {"week_ending": week_end, "headline": h["main"], "details": h["details"],
+                "electricity_kwh": keep(snap["energy"]), "wifi_activity": keep(snap["wifi"]),
+                "avg_people_on_wifi_and_share_of_hours_used": snap["wifi_avg"],
+                "higher_than_usual_events_this_week": snap["events"],
+                "events_week_before": snap["events_prev"],
+                "share_of_building_hours_missing": snap["missing"]}
+
+    def forecasts():
+        daily, types, ev = common.predictive()
+        return next_forecasts(daily, types, ev)
+
+    def recs():
+        r = common.recommendations()
+        return r[[c for c in ("rule", "title", "building", "finding", "next_step") if c in r.columns]]
+
+    return chat.Context(
+        college=ds.name, source=ds.source, week_end=week_end, first=ds.first, last=ds.last,
+        overview=overview, snapshot=snapshot, building_week=lambda: insights.building_week(df, week_end),
+        events=lambda: events, summary=lambda: common.institutional()[1], forecasts=forecasts,
+        recommendations=recs, tariff=st.session_state.get("tariff"),
+        factor=st.session_state.get("emission_factor"))
+
+
+def _chat_log():
+    return st.session_state.setdefault("chat", {}).setdefault(common.college(), [])
+
+
+def conversation(week_end):
+    key = api_key()
+    if not key:
+        st.info(
+            "**The conversation needs an Anthropic API key.** Add it once in the app's secrets as "
+            "`ANTHROPIC_API_KEY` (Streamlit Cloud: Manage app, Settings, Secrets). Until then, the "
+            "**Quick answers** tab works without one.", icon=":material/key:")
+        return
+    log = _chat_log()
+    asked = sum(m["role"] == "user" for m in log)
+    if not log:
+        st.caption("Ask anything. Questions about this college are answered from NEXUS's numbers; "
+                   "NEXUS shows which lookups it used.")
+        picked = st.pills("Try asking", SUGGESTED, key="chat_pick")
+    else:
+        picked = None
+    thread = st.container()          # the whole conversation lives here, above the input box
+    with thread:
+        for m in log:
+            _bubble(m["role"], m["content"], m.get("used"))
+    prompt = st.chat_input("Ask NEXUS anything", key="chat_text") or picked
+    if log:
+        st.button("New conversation", type="tertiary", on_click=lambda: log.clear())
+    if not prompt:
+        return
+    if asked >= MAX_QUESTIONS:
+        st.warning(f"This session has reached {MAX_QUESTIONS} questions. Reload the page to start again.")
+        return
+    log.append({"role": "user", "content": prompt})
+    ctx = _context(week_end)
+    model = st.secrets.get("ANTHROPIC_MODEL", chat.DEFAULT_MODEL) if _has_secrets() else chat.DEFAULT_MODEL
+    with thread:
+        _bubble("user", prompt)
+        with st.chat_message("assistant", avatar=":material/hub:"):
+            try:
+                import anthropic
+                client = anthropic.Anthropic(api_key=key, timeout=60, max_retries=1)
+                text = st.write_stream(chat.reply(client, model, log, ctx))
+            except Exception as e:   # key rejected, no credit, offline ...
+                text = chat.friendly_error(e)
+                st.error(text)
+            if ctx.used:
+                st.caption("Looked up: " + ", ".join(dict.fromkeys(ctx.used)).replace("_", " "))
+    log.append({"role": "assistant", "content": text if isinstance(text, str) else str(text),
+                "used": list(ctx.used)})
+
+
+def _bubble(role, content, used=None):
+    with st.chat_message(role, avatar=":material/person:" if role == "user" else ":material/hub:"):
+        st.markdown(content)
+        if used:
+            st.caption("Looked up: " + ", ".join(dict.fromkeys(used)).replace("_", " "))
+
+
+def _has_secrets():
+    try:
+        st.secrets.get("x")
+        return True
+    except Exception:
+        return False
+
+
+def show(week_end):
+    tab_chat, tab_quick = st.tabs(["Conversation", "Quick answers (no AI)"])
+    with tab_chat:
+        conversation(week_end)
+    with tab_quick:
+        quick_answers(week_end)

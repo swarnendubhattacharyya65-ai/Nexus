@@ -9,7 +9,7 @@ import streamlit as st
 from nexus.dataset import IIITD, iiitd
 from nexus.institutional import building_summary, load_occupancy
 from nexus.kpis import default_week_end, snapshot
-from nexus.predictive import backtest, daily_energy, day_types, evaluate, forecast
+from nexus.predictive import backtest, daily_energy, day_types, evaluate, extend_types, forecast
 from nexus.recommend import build
 from nexus.resource import add_baseline, find_events, load_energy
 
@@ -26,8 +26,17 @@ def uploads():
     return st.session_state.setdefault("uploads", {})
 
 
+def unavailable():
+    """Colleges searched for by name where no public data was found (or the search could not run)."""
+    return st.session_state.setdefault("unavailable", {})
+
+
 def colleges():
-    return [IIITD, *uploads()]
+    return [IIITD, *uploads(), *unavailable()]
+
+
+def is_unavailable():
+    return college() in unavailable()
 
 
 def college():
@@ -52,6 +61,30 @@ VERSION = _code_version()
 @st.cache_resource(show_spinner=False)
 def _iiitd(version):
     return iiitd()
+
+
+def geo():
+    """Map data for the selected college: (outline features, campus outline, place or None).
+
+    IIIT-Delhi's outlines ship with NEXUS. Any other college's come from the online search
+    (OpenStreetMap), matched to its meter buildings by name only where that is unambiguous.
+    """
+    name = college()
+    if name == IIITD:
+        from views import campus_map
+        if not campus_map.outlines_ready():
+            return None
+        b, c = campus_map.load_outlines()
+        return b, c, None
+    entry = {**unavailable(), **uploads()}.get(name, {})
+    if not entry.get("outlines"):
+        return None
+    if "geo" not in entry:
+        from nexus import place
+        ds = entry.get("dataset")
+        entry["geo"] = (place.match_buildings(entry["outlines"], sorted(ds.energy["building"].unique()))
+                        if ds is not None else (entry["outlines"], {}))
+    return entry["geo"][0], [], entry.get("place")
 
 
 def dataset():
@@ -105,7 +138,7 @@ def institutional():
 
 
 def _predictive(ds):
-    daily, types = daily_energy(ds), day_types(ds)
+    daily, types = daily_energy(ds), extend_types(day_types(ds))
     return daily, types, evaluate(backtest(daily, types))
 
 

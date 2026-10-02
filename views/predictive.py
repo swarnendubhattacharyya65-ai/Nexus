@@ -1,164 +1,166 @@
-"""Predictive Intelligence page: 14-day daily energy forecasts, tested on the last year of data."""
+"""Predictive Intelligence page: 14-day daily energy forecasts, starting where the data ends."""
 import altair as alt
 import pandas as pd
 import streamlit as st
 
-from nexus.predictive import BAND, HORIZON, METHODS, WARM_UP, forecast
+from nexus.predictive import BAND, HORIZON, METHODS, forecast
 from views import common
 from views.common import ACTUAL, FORECAST, NEUTRAL
 
 
 def show():
     daily, types, ev = common.predictive()
-    if ev.empty:
-        st.info("Insufficient data to test forecasts: no building has enough complete days.")
-        return
-    train, test = ev["train_period"].iloc[0], ev["test_period"].iloc[0]
-
-    # -------------------------------------------------------------- controls
-    usable = ev[ev["note"] == ""]
+    usable = ev[ev["note"] == ""] if not ev.empty else ev
     if usable.empty:
-        st.info("Insufficient data to test forecasts.")
+        st.info("Insufficient data to forecast: no building has enough complete days.")
         return
-    c1, c2 = st.columns([1, 1])
-    building = c1.selectbox("Building", sorted(usable["building"]), key="pred_building")
-    s = daily[daily["building"] == building].set_index("date")["kwh"].sort_index()
-    first = (s.index.min() + pd.Timedelta(days=WARM_UP)).date()
-    last = (s.index.max() - pd.Timedelta(days=HORIZON - 1)).date()
-    origin = pd.Timestamp(c2.date_input("Forecast made on", last, min_value=first,
-                                        max_value=last, key="pred_origin"))
+    train, test = usable["train_period"].iloc[0], usable["test_period"].iloc[0]
+    has_cal = common.dataset().has_calendar
 
+    # ---------------------------------------------------- one forecast per building
+    # Each forecast starts the day after that building's last complete day of data.
+    rows, forecasts = [], {}
+    for r in usable.itertuples():
+        s = daily[daily["building"] == r.building].set_index("date")["kwh"].sort_index()
+        origin = s.index.max() + pd.Timedelta(days=1)
+        f = forecast(s, types, origin)
+        f["forecast"] = f[r.method]
+        f["low"] = f["forecast"] * (1 + r.band_low)
+        f["high"] = f["forecast"] * (1 + r.band_high)
+        forecasts[r.building] = (s, origin, f)
+        recent = s[s.index >= origin - pd.Timedelta(days=HORIZON)]
+        complete = not f["forecast"].isna().any()
+        rows.append({"Building": r.building, "From": origin, "kwh": f["forecast"].sum() if complete else None,
+                     "recent": recent.sum() if len(recent) == HORIZON else None})
+    summary = pd.DataFrame(rows)
+    last_data = max(o for _, o, _ in forecasts.values()) - pd.Timedelta(days=1)
+
+    st.subheader(f"The next {HORIZON} days after the data ends")
+    st.markdown(
+        f"The data ends on **{last_data:%a %d %b %Y}**, so every forecast below starts the day after "
+        f"and covers the {HORIZON} days that follow. Nothing here is a forecast of past days."
+        + ("" if last_data >= pd.Timestamp.today().normalize() - pd.Timedelta(days=7) else
+           f" These dates are in the past because this college's public data stops there; "
+           "they are not predictions for today."))
+
+    both = summary.dropna(subset=["kwh", "recent"])
+    if len(both) == len(summary):
+        change = both["kwh"].sum() / both["recent"].sum() - 1
+        c1, c2, c3 = st.columns(3)
+        c1.metric(f"Campus, next {HORIZON} days", f"{both['kwh'].sum():,.0f} kWh")
+        c2.metric(f"Last {HORIZON} days of data", f"{both['recent'].sum():,.0f} kWh")
+        c3.metric("Forecast vs last 14 days", f"{change:+.1%}")
+    else:
+        st.info("Campus total not shown: at least one building has an incomplete forecast or "
+                "too few recent complete days.")
+
+    # -------------------------------------------------------------- building view
+    building = st.selectbox("Building", sorted(usable["building"]), key="pred_building")
+    s, origin, f = forecasts[building]
     r = usable.set_index("building").loc[building]
     method = r["method"]
-    f = forecast(s, types, origin)
-    f["forecast"] = f[method]
-    f["low"] = f["forecast"] * (1 + r["band_low"])
-    f["high"] = f["forecast"] * (1 + r["band_high"])
     if f["forecast"].isna().all():
-        st.info("Insufficient data: no complete days in the 4 weeks before this date.")
+        st.info("Insufficient data: no complete days in the 4 weeks before the end of the data.")
         return
     missing_days = int(f["forecast"].isna().sum())
 
-    # ----------------------------------------------------------------- chart
     before = s[(s.index >= origin - pd.Timedelta(days=28)) & (s.index < origin)]
-    chart_df = pd.concat([
-        pd.DataFrame({"date": before.index, "actual": before.to_numpy()}),
-        f[["date", "actual", "forecast", "low", "high", "day_type"]],
-    ], ignore_index=True)
-
+    past = pd.DataFrame({"date": before.index, "actual": before.to_numpy()})
+    # The line joins the last real day to the first forecast day so the break is visible.
+    bridge = pd.concat([past.tail(1).rename(columns={"actual": "forecast"}),
+                        f[["date", "forecast"]]], ignore_index=True)
     x = alt.X("date:T", title=None, axis=alt.Axis(format="%d %b"))
     band = alt.Chart(f).mark_area(color=FORECAST, opacity=0.2).encode(
         x=x, y=alt.Y("low:Q", title="kWh per day"), y2="high:Q")
-    predicted = alt.Chart(f).mark_line(color=FORECAST, strokeWidth=2, strokeDash=[4, 3],
-                                       point=alt.OverlayMarkDef(color=FORECAST, size=30)
-                                       ).encode(x=x, y="forecast:Q")
-    actual = alt.Chart(chart_df.dropna(subset=["actual"])).mark_line(
-        color=ACTUAL, strokeWidth=2, point=alt.OverlayMarkDef(color=ACTUAL, size=30)
-    ).encode(x=x, y="actual:Q")
-    made = alt.Chart(pd.DataFrame({"date": [origin]})).mark_rule(
+    predicted = alt.Chart(bridge).mark_line(color=FORECAST, strokeWidth=2, strokeDash=[4, 3]
+                                            ).encode(x=x, y="forecast:Q")
+    points = alt.Chart(f).mark_point(color=FORECAST, filled=True, size=30).encode(x=x, y="forecast:Q")
+    actual = alt.Chart(past).mark_line(color=ACTUAL, strokeWidth=2,
+                                       point=alt.OverlayMarkDef(color=ACTUAL, size=30)
+                                       ).encode(x=x, y="actual:Q")
+    end = alt.Chart(pd.DataFrame({"date": [origin]})).mark_rule(
         color=NEUTRAL, strokeDash=[2, 2]).encode(x="date:T")
     nearest = alt.selection_point(nearest=True, on="pointerover", fields=["date"], empty=False)
-    hover = alt.Chart(chart_df).mark_rule(color=NEUTRAL).encode(
-        x="date:T",
-        opacity=alt.condition(nearest, alt.value(0.4), alt.value(0)),
+    hover_df = pd.concat([past.assign(day_type=None), f[["date", "day_type", "forecast", "low", "high"]]],
+                         ignore_index=True)
+    hover = alt.Chart(hover_df).mark_rule(color=NEUTRAL).encode(
+        x="date:T", opacity=alt.condition(nearest, alt.value(0.4), alt.value(0)),
         tooltip=[alt.Tooltip("date:T", title="Day", format="%a %d %b %Y"),
-                 alt.Tooltip("day_type:N", title="Day type"),
                  alt.Tooltip("actual:Q", title="Actual kWh", format=",.0f"),
                  alt.Tooltip("forecast:Q", title="Forecast kWh", format=",.0f"),
                  alt.Tooltip("low:Q", title="80% range from", format=",.0f"),
                  alt.Tooltip("high:Q", title="80% range to", format=",.0f")],
     ).add_params(nearest)
 
-    st.subheader(f"{building}: forecast made on {origin:%d %b %Y}")
+    st.subheader(f"{building}: forecast from {origin:%d %b %Y}")
     st.markdown(
-        f'<span style="color:{ACTUAL}">━━</span>&nbsp;Actual&emsp;'
+        f'<span style="color:{ACTUAL}">━━</span>&nbsp;Recorded&emsp;'
         f'<span style="color:{FORECAST}">╍╍</span>&nbsp;Forecast&emsp;'
         f'<span style="color:{FORECAST};opacity:.4">■</span>&nbsp;80% range&emsp;'
-        f'<span style="color:{NEUTRAL}">┊</span>&nbsp;Forecast made',
-        unsafe_allow_html=True)
-    st.altair_chart(band + actual + predicted + made + hover, width="stretch")
-    st.caption("The 28 days before the forecast date, then the 14 forecast days. Missing "
-               "points are days without a complete 24 hours of meter data.")
+        f'<span style="color:{NEUTRAL}">┊</span>&nbsp;End of data', unsafe_allow_html=True)
+    st.altair_chart(band + actual + predicted + points + end + hover, width="stretch")
+    st.caption("The last 28 recorded days, then the forecast. Missing points are days without a "
+               "complete 24 hours of meter data.")
 
-    # --------------------------------------------------------------- numbers
-    scored = f.dropna(subset=["actual", "forecast"])
-    m1, m2, m3 = st.columns(3)
+    m1, m2 = st.columns(2)
     if missing_days:
         m1.metric(f"Forecast, {HORIZON} days", "Incomplete",
-                  help=f"{missing_days} of {HORIZON} days could not be forecast: there were not "
-                       "enough recent complete days of the same weekday or day type. No total "
-                       "is given rather than a partial one.")
+                  help=f"{missing_days} of {HORIZON} days could not be forecast: not enough recent "
+                       "complete days of the same weekday or day type. No total is given rather "
+                       "than a partial one.")
     else:
         m1.metric(f"Forecast, {HORIZON} days", f"{f['forecast'].sum():,.0f} kWh",
                   help="Sum of the daily forecasts. The 80% range on the chart is per day; it was "
                        "tested on single days, not on 14-day totals.")
-    if len(scored) == HORIZON:
-        miss = scored["actual"].sum() / scored["forecast"].sum() - 1
-        m2.metric("Actual", f"{scored['actual'].sum():,.0f} kWh")
-        m3.metric("Actual vs forecast", f"{miss:+.1%}")
-    else:
-        m2.metric("Actual", "Incomplete",
-                  help=f"Only {len(scored)} of {HORIZON} days have both a forecast and complete "
-                       "meter data to compare.")
+        recent = s[s.index >= origin - pd.Timedelta(days=HORIZON)]
+        if len(recent) == HORIZON:
+            m2.metric(f"Last {HORIZON} recorded days", f"{recent.sum():,.0f} kWh",
+                      f"{f['forecast'].sum() / recent.sum() - 1:+.1%} forecast vs these")
+        else:
+            m2.metric(f"Last {HORIZON} recorded days", "Incomplete",
+                      help="Some of those days lack a complete 24 hours of meter data.")
+
     st.markdown(
         f"**Method for {building}:** {METHODS[method].lower()}. "
-        + (("For each day, the median of recent days of the same type (semester weekday, "
-            "break weekday, Saturday, Sunday or holiday) from the institute calendar, "
-            "which is published in advance." if common.dataset().has_calendar else
-            "For each day, the median of recent days of the same type (weekday, Saturday, "
-            "Sunday). No academic calendar was uploaded, so terms and holidays are not known.")
+        + (("For each day, the median of recent days of the same type"
+            + (" (semester weekday, break weekday, Saturday, Sunday or holiday) from the "
+               "institute calendar" if has_cal else " (weekday, Saturday, Sunday)")
+            + ". Weekdays after the calendar ends fall back to the same weekday last week, "
+              "because whether they are term days or holidays is not known.")
            if method == "calendar" else
            "Each day is forecast as the same weekday in the most recent week.")
-        + f" It was chosen because it was more accurate on {train}. On {test}, which was "
-          f"not used to choose it, it missed by **{r['error_pct']:.0%}** of a typical day on "
-          f"average, and **{r['band_coverage']:.0%}** of actual days fell inside the 80% range."
-        + ("" if method == "naive" else
-           f" Compared with the simple rule on {test}, it was **{abs(r['skill']):.0%} "
-           f"{'more' if r['skill'] >= 0 else 'less'} accurate**."))
+        + f" It was chosen because it was more accurate on earlier data ({train}).")
 
-    with st.expander("Day by day"):
-        table = f.assign(error=(f["actual"] - f["forecast"]) / f["forecast"])
+    with st.expander("Forecast table"):
         st.dataframe(pd.DataFrame({
-            "Day": table["date"].dt.strftime("%a %d %b %Y"),
-            "Day type": table["day_type"],
-            "Forecast kWh": table["forecast"].round(),
-            "80% range": [f"{lo:,.0f} to {hi:,.0f}" for lo, hi in zip(table["low"], table["high"])],
-            "Actual kWh": table["actual"].round(),
-            "Actual vs forecast %": (table["error"] * 100).round(),
+            "Day": f["date"].dt.strftime("%a %d %b %Y"),
+            "Day type": f["day_type"].fillna("Weekday (calendar not known)"),
+            "Forecast kWh": f["forecast"].round(),
+            "80% range": [f"{lo:,.0f} to {hi:,.0f}" if pd.notna(lo) else "-"
+                          for lo, hi in zip(f["low"], f["high"])],
         }), hide_index=True)
 
-    # -------------------------------------------------------------- accuracy
-    st.subheader("How accurate is this?")
-    cal = usable[usable["method"] == "calendar"]
-    better = ", ".join(f"{b} {s:+.0%}" for b, s in zip(cal["building"], cal["skill"]) if s > 0)
-    worse = ", ".join(f"{b} {s:+.0%}" for b, s in zip(cal["building"], cal["skill"]) if s <= 0)
-    st.markdown(
-        "Tested by forecasting every 7 days through the history, using only data available "
-        f"at the time. Each building's method was chosen on {train}, then scored on "
-        f"{test}, which was not used to choose it.\n\n"
-        f"- The calendar method was chosen for **{len(cal)} of {len(usable)}** buildings"
-        + ("; the others use the simple 'same weekday last week' rule.\n"
-           if len(cal) < len(usable) else ".\n")
-        + f"- On {test} it beat the simple rule in: **{better or 'none'}**.\n"
-        + (f"- On {test} it did not beat the simple rule in: **{worse}**. NEXUS reports "
-           "this rather than switch methods after seeing the test year.\n" if worse else ""))
-    st.dataframe(pd.DataFrame({
-        "Building": usable["building"],
-        "Method": usable["method"].map(METHODS),
-        "Average miss, kWh/day": usable["mae_calendar"].where(
-            usable["method"] == "calendar", usable["mae_naive"]).round(),
-        "Average miss, % of a day": (usable["error_pct"] * 100).round(1),
-        "Better than simple rule by %": (usable["skill"] * 100).round(),
-        "Days inside 80% range %": (usable["band_coverage"] * 100).round(),
-        "Forecasts scored": usable["test_days"],
-    }), hide_index=True)
+    # ------------------------------------------------------------ reliability
+    with st.expander("How reliable has this method been?"):
+        st.markdown(
+            f"Each building's method was chosen on {train}, then checked on {test}, which was not used "
+            f"to choose it. For {building}, the method missed by **{r['error_pct']:.0%}** of a typical "
+            f"day on average in {test}, and **{r['band_coverage']:.0%}** of days fell inside the 80% "
+            "range."
+            + ("" if method == "naive" else
+               f" It was **{abs(r['skill']):.0%} {'more' if r['skill'] >= 0 else 'less'} accurate** "
+               "than the simple rule."))
+        st.dataframe(pd.DataFrame({
+            "Building": usable["building"],
+            "Method": usable["method"].map(METHODS),
+            "Average miss, % of a day": (usable["error_pct"] * 100).round(1),
+            "Days inside 80% range %": (usable["band_coverage"] * 100).round(),
+        }), hide_index=True)
     for row in ev[ev["note"] != ""].itertuples():
         st.caption(f"{row.building}: not forecast. {row.note}.")
 
     st.warning(
-        "**Limits.** Forecasts are statistical patterns, not guarantees. They cannot foresee "
-        "events, equipment faults or unusual weather (the data has no weather), and they "
-        "rely on the institute calendar being known in advance. Days without complete meter "
-        f"data are skipped. The 80% range comes from the {BAND[0]:.0%}-{BAND[1]:.0%} spread of "
-        f"past forecast errors. Data covers {daily['date'].min():%Y}-{daily['date'].max():%Y}, "
-        "so forecasts are shown for past dates where the actual outcome is known.")
+        "**Limits.** Forecasts are statistical patterns, not guarantees. They cannot foresee events, "
+        "equipment faults or unusual weather (there is no weather input), and weekdays after the "
+        "calendar ends are not known to be term days or holidays. Days without complete meter data "
+        f"are skipped. The 80% range comes from the {BAND[0]:.0%}-{BAND[1]:.0%} spread of past errors.")

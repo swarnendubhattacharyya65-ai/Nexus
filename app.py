@@ -51,8 +51,7 @@ def institutional_page():
 def predictive_page():
     shell.page_header("Predictive Intelligence",
                       f"Each building's daily energy forecast {HORIZON} days ahead with two "
-                      "simple, transparent methods, tested on past data. Pick any date to see "
-                      "what NEXUS would have forecast then, next to what actually happened.")
+                      "simple, transparent methods, starting from the last day of recorded data.")
     predictive.show()
 
 
@@ -64,32 +63,31 @@ def recommendations_page():
 
 
 def campus_page():
+    ds = common.dataset()
     shell.page_header("Campus Map",
-                      "IIIT-Delhi's real buildings in 3D, coloured by what NEXUS found in the "
+                      f"{ds.name}'s real buildings in 3D, coloured by what NEXUS found in the "
                       "week chosen at the top. Switch layers on the map; drag to rotate, pinch "
-                      "to zoom.")
-    if not common.dataset().has_map:
-        st.info("The 3D map is available for IIIT-Delhi. An uploaded college would also need "
-                "its building outlines; switch College at the top to IIIT-Delhi to see the map.")
+                      "to zoom. The map moves to the college you select.")
+    geo = common.geo()
+    if geo is None:
+        st.info("No building outlines are available for this college. Outlines come from "
+                "OpenStreetMap; type the college's name in the College box to look it up again.")
         return
-    if not campus_map.outlines_ready():
-        st.info("Building outlines are not downloaded yet. In the codespace, run "
-                "`python scripts/fetch_campus.py`, then commit the `data/campus` folder.")
-        return
+    buildings, outline, pl = geo
     week_end = pd.Timestamp(shell.week_end())
     df, _ = common.load()
-    status = campus_map.week_status(week_end, df, common.occupancy())
-    buildings, outline = campus_map.load_outlines()
-    replay = campus_map.timeline(week_end, df, common.occupancy())
+    status = campus_map.week_status(week_end, df, ds.occupancy, ds.name, ds.warnings)
+    replay = campus_map.timeline(week_end, df, ds.occupancy, ds.name, ds.warnings)
     picked = campus_map.render(campus_map.payload(buildings, outline, status,
-                                                  f"Week ending {week_end:%a %-d %b %Y}", replay))
+                                                  f"Week ending {week_end:%a %-d %b %Y}", replay,
+                                                  view=ds.name, place=pl))
     st.caption("Press ▶ on the map to replay the 12 weeks to the chosen date, one day at a time, "
                "or drag the slider to any day. Colours follow the selected layer.")
     if picked and picked.picked:
         st.session_state["campus_picked"] = picked.picked
     campus_map.details(status, st.session_state.get("campus_picked"))
     campus_map.status_table(status)
-    campus_map.matching_notes(status)
+    campus_map.matching_notes(status, ds.name == common.IIITD, buildings)
 
 
 def data_page():
@@ -110,8 +108,8 @@ def data_page():
 
 def ask_page():
     shell.page_header("Ask NEXUS",
-                      "Questions about the selected college and week, answered from the numbers "
-                      "on the other pages.")
+                      "Talk to NEXUS about the selected college. It looks numbers up in the same "
+                      "tables as the other pages, and says so when it does.")
     ask.show(pd.Timestamp(shell.week_end()))
 
 
@@ -134,8 +132,8 @@ def help_page():
 
 def upload_page():
     shell.page_header("Add college data",
-                      "Run the same analyses on another college: upload its meter readings, "
-                      "see every check, then use every page with that college selected.")
+                      "Type a college's name in the College box at the top and NEXUS searches public "
+                      "sources for its data. Or add a file yourself here.")
     upload.show()
 
 
@@ -177,5 +175,8 @@ if goto:
 with st.sidebar:
     st.caption("Demo data: I-BLEND, IIIT-Delhi (CC0). Public data, not PES data.")
 
-shell.top_bar()
-page.run()
+has_data = shell.top_bar()
+if has_data or page in (PAGES["upload"], PAGES["settings"], PAGES["help"]):
+    page.run()
+else:
+    upload.unavailable_view()
