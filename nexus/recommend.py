@@ -32,8 +32,8 @@ RULES = [
     ("R3", "Investigate", "High use when near-empty",
      f"Near-empty hours use at least {QUIET_RATIO:.0%} of the energy of busy hours."),
     ("R4", "Plan", "Forecast differs from last year",
-     f"The next 14 days are forecast at least {PLAN_CHANGE:.0%} above or below the same "
-     "14 days a year earlier."),
+     f"The latest forecast (the last 14 days of the data) is at least {PLAN_CHANGE:.0%} above "
+     "or below the same 14 days a year earlier."),
     ("R5", "Caution", "Less reliable forecast",
      f"In the test year the forecast missed by more than {FORECAST_MAX_ERROR:.0%} of a typical "
      "day, or did worse than the simple rule."),

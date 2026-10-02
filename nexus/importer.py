@@ -9,7 +9,9 @@ Expected file (one row per meter reading; any order; .csv or .csv.gz):
 Optional calendar file: date, working_day (1/0), activity (high/low).
 
 Readings become hourly kWh with the same rule as IIIT-Delhi: an hour counts only if at
-least 75% of its readings are present. Nothing is filled in or smoothed.
+least 75% of its readings are present, and is then scaled to the full hour (the same as
+averaging power over the hour). Hours with fewer readings are left blank; nothing is smoothed.
+At least 4 weeks of readings are needed.
 """
 import io
 
@@ -21,6 +23,7 @@ from nexus.dataset import Dataset, calendar_for
 ENERGY_COLUMNS = {"kwh": "kWh per interval", "kw": "average kW", "w": "watts"}
 MAX_ROWS = 3_000_000
 MAX_BUILDINGS = 40
+MIN_DAYS = 28         # the week cards and baselines need several weeks of history
 ZERO_LIMIT = 0.5      # a meter reading exactly 0 in more than half its hours is not analysed
 GAP_WARNING = 0.3     # warn when a building misses more than 30% of hours
 
@@ -62,7 +65,12 @@ def build(name, raw, calendar_raw=None, source=""):
     if pd.api.types.is_numeric_dtype(df["timestamp"]):
         raise ImportProblem("Timestamps look like numbers (Unix seconds). Use local date and "
                             "time text instead, e.g. 2016-01-01 13:00, so the time zone is clear.")
-    ts = pd.to_datetime(df["timestamp"], errors="coerce", format="mixed")
+    try:
+        ts = pd.to_datetime(df["timestamp"], errors="coerce", format="mixed")
+    except (ValueError, TypeError):
+        raise ImportProblem("Timestamps carry time-zone offsets that change (for example with "
+                            "daylight saving). Give plain local date and time instead, e.g. "
+                            "2016-01-01 13:00.")
     if getattr(ts.dt, "tz", None) is not None:
         ts = ts.dt.tz_localize(None)   # keep the local clock time as written
         report["warnings"].append("Timestamps had a time-zone offset; their local clock time was kept.")
@@ -114,7 +122,7 @@ def build(name, raw, calendar_raw=None, source=""):
         grouped = g.groupby(hour)["value"]
         count = grouped.size()
         if unit == "kwh":
-            kwh = grouped.sum()
+            kwh = grouped.sum() * per_hour / count.clip(upper=per_hour)   # scale to the full hour
         elif unit == "kw":
             kwh = grouped.mean()
         else:
@@ -135,6 +143,10 @@ def build(name, raw, calendar_raw=None, source=""):
         })
     if not energy_parts:
         raise ImportProblem("No usable rows after the checks below.")
+    days = (end - start) / pd.Timedelta(days=1)
+    if days < MIN_DAYS:
+        raise ImportProblem(f"The readings cover {days:.0f} days. NEXUS needs at least {MIN_DAYS} "
+                            "days to build baselines and compare weeks.")
     energy = pd.concat(energy_parts, ignore_index=True)
 
     warnings = {}
@@ -169,9 +181,9 @@ def build(name, raw, calendar_raw=None, source=""):
         notes.append("No people or Wi-Fi counts were uploaded, so occupancy analysis is not available.")
 
     report["period"] = (energy["hour"].min(), energy["hour"].max())
-    ds = Dataset(name=name, source=source or f"Uploaded data: {name}. Stays in this browser session.",
+    ds = Dataset(name=name, source=source or f"Uploaded data: {name}. Held only for this session.",
                  energy=energy, calendar=calendar, occupancy=occupancy, warnings=warnings,
-                 notes=notes)
+                 notes=notes, has_calendar=cal is not None)
     return ds, report
 
 

@@ -51,9 +51,9 @@ def _answer(item, week_end, i):
     if key == "save":
         share = st.session_state.get(f"share_{i}", 20) / 100
         return ask.savings(summary, share, st.session_state.get("tariff"),
-                           st.session_state.get("emission_factor"))
+                           st.session_state.get("emission_factor"), common.dataset().has_calendar)
     if key == "underused":
-        return ask.underused(summary)
+        return ask.underused(summary, common.dataset().has_calendar)
 
 
 def show(week_end):

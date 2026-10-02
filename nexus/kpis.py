@@ -69,6 +69,25 @@ def compare(df, value, week_end):
     }
 
 
+def people_per_hour(occ, week_end):
+    """Average people on Wi-Fi across campus per hour, over hours every building recorded.
+
+    Only hours with a count from every building (in this week) are used, so a gap never
+    pulls the average down. Returns (average, share of the week's hours used).
+    """
+    start, end = window(week_end)
+    rec = occ.dropna(subset=["occ_mean"])
+    w = rec[(rec["hour"] >= start) & (rec["hour"] < end)]
+    span = rec.groupby("building")["hour"].agg(["min", "max"])
+    buildings = int(((span["min"] < end) & (span["max"] >= start)).sum())   # counting that week
+    if w.empty or not buildings:
+        return None, 0.0
+    per_hour = w.groupby("hour").agg(people=("occ_mean", "sum"), n=("building", "nunique"))
+    full = per_hour[per_hour["n"] == buildings]
+    share = len(full) / HOURS_PER_WEEK
+    return (full["people"].mean() if share >= MIN_COVERAGE else None), share
+
+
 def daily(df, value, week_end, how="mean"):
     """One value per day for the sparkline: the 4 weeks ending on `week_end`."""
     end = window(week_end)[1]
@@ -110,6 +129,7 @@ def snapshot(df, events, occ, week_end, ds=None):
         "energy": compare(energy, "kwh", week_end),
         "energy_daily": daily(energy, "kwh", week_end),
         "wifi": compare(occ[["hour", "building", "occ_mean"]], "occ_mean", week_end),
+        "wifi_avg": people_per_hour(occ, week_end),
         "wifi_daily": daily(occ, "occ_mean", week_end),
         "events": int(((high["start"] >= start) & (high["start"] < end)).sum()),
         "events_prev": int(((high["start"] >= start - WEEK) & (high["start"] < start)).sum()),

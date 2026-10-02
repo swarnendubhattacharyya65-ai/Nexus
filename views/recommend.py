@@ -32,5 +32,6 @@ def show():
         st.dataframe(pd.DataFrame(RULES, columns=["Rule", "Type", "Name", "Triggered when"]),
                      hide_index=True)
         st.markdown("Thresholds are set in `nexus/recommend.py`. Buildings or periods without "
-                    "enough data are skipped rather than guessed. Money values are not shown "
-                    "because the dataset has no electricity tariff.")
+                    "enough data are skipped rather than guessed. The data has no tariff, so "
+                    "rules use kWh; rupees appear in Ask NEXUS and Reports only from a tariff "
+                    "you enter in Settings.")

@@ -11,6 +11,18 @@ from nexus.kpis import HOURS_PER_WEEK, compare, window
 from nexus.predictive import HORIZON, forecast
 
 TREND_DAYS = 30
+
+
+def in_service(df, week_end):
+    """Analysed buildings whose meter was in service during the week (first to last reading).
+
+    Baseline tables hold only recorded hours, so a meter that was offline all week has no
+    rows; this list lets weekly tables show it with 0 hours instead of dropping it.
+    """
+    start, end = window(week_end)
+    analysed = df[df["flag"] != "unreliable meter"]
+    span = analysed.groupby("building")["hour"].agg(["min", "max"])
+    return sorted(span[(span["min"] < end) & (span["max"] >= start)].index)
 GAP_SHARE = 0.3      # a building missing this share of the week's hours is a meter item
 
 
@@ -109,7 +121,7 @@ def feed(events, df, recs, week_end, forecast_change=None, limit=6):
                       "when": f"{e.start:%a %-d %b, %H:%M}"})
     analysed = df[df["flag"] != "unreliable meter"]
     w = analysed[(analysed["hour"] >= start) & (analysed["hour"] < end)]
-    recorded = w.groupby("building")["kwh"].count()
+    recorded = w.groupby("building")["kwh"].count().reindex(in_service(df, week_end), fill_value=0)
     for b, n in recorded[recorded < (1 - GAP_SHARE) * HOURS_PER_WEEK].items():
         items.append({"kind": "data", "title": b,
                       "text": f"Meter recorded only {n} of {HOURS_PER_WEEK} hours this week; "
@@ -134,6 +146,9 @@ def building_week(df, week_end):
     t = w.groupby("building").agg(kwh=("kwh", "sum"), recorded=("kwh", "count"),
                                   high=("flag", lambda f: int((f == "high").sum())),
                                   low=("flag", lambda f: int((f == "low").sum())))
+    t = t.reindex(in_service(df, week_end)).fillna({"kwh": 0, "recorded": 0, "high": 0, "low": 0})
+    t[["recorded", "high", "low"]] = t[["recorded", "high", "low"]].astype(int)
+    t["kwh"] = t["kwh"].where(t["recorded"] > 0)
     t = t.join(change.set_index("building")[["change"]])
     return pd.DataFrame({
         "Building": t.index, "kWh this week": t["kwh"].round().to_numpy(),

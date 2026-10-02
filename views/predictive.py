@@ -37,6 +37,7 @@ def show():
     if f["forecast"].isna().all():
         st.info("Insufficient data: no complete days in the 4 weeks before this date.")
         return
+    missing_days = int(f["forecast"].isna().sum())
 
     # ----------------------------------------------------------------- chart
     before = s[(s.index >= origin - pd.Timedelta(days=28)) & (s.index < origin)]
@@ -82,20 +83,30 @@ def show():
     # --------------------------------------------------------------- numbers
     scored = f.dropna(subset=["actual", "forecast"])
     m1, m2, m3 = st.columns(3)
-    m1.metric(f"Forecast, {HORIZON} days", f"{f['forecast'].sum():,.0f} kWh",
-              help=f"80% range {f['low'].sum():,.0f} to {f['high'].sum():,.0f} kWh")
+    if missing_days:
+        m1.metric(f"Forecast, {HORIZON} days", "Incomplete",
+                  help=f"{missing_days} of {HORIZON} days could not be forecast: there were not "
+                       "enough recent complete days of the same weekday or day type. No total "
+                       "is given rather than a partial one.")
+    else:
+        m1.metric(f"Forecast, {HORIZON} days", f"{f['forecast'].sum():,.0f} kWh",
+                  help="Sum of the daily forecasts. The 80% range on the chart is per day; it was "
+                       "tested on single days, not on 14-day totals.")
     if len(scored) == HORIZON:
         miss = scored["actual"].sum() / scored["forecast"].sum() - 1
         m2.metric("Actual", f"{scored['actual'].sum():,.0f} kWh")
         m3.metric("Actual vs forecast", f"{miss:+.1%}")
     else:
         m2.metric("Actual", "Incomplete",
-                  help=f"Only {len(scored)} of {HORIZON} days have complete meter data.")
+                  help=f"Only {len(scored)} of {HORIZON} days have both a forecast and complete "
+                       "meter data to compare.")
     st.markdown(
         f"**Method for {building}:** {METHODS[method].lower()}. "
-        + ("For each day, the median of recent days of the same type (semester weekday, "
-           "break weekday, Saturday, Sunday or holiday) from the institute calendar, "
-           "which is published in advance."
+        + (("For each day, the median of recent days of the same type (semester weekday, "
+            "break weekday, Saturday, Sunday or holiday) from the institute calendar, "
+            "which is published in advance." if common.dataset().has_calendar else
+            "For each day, the median of recent days of the same type (weekday, Saturday, "
+            "Sunday). No academic calendar was uploaded, so terms and holidays are not known.")
            if method == "calendar" else
            "Each day is forecast as the same weekday in the most recent week.")
         + f" It was chosen because it was more accurate on {train}. On {test}, which was "

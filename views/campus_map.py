@@ -160,6 +160,12 @@ LEGENDS = {
              (NO_DATA, "No Wi-Fi data"), (OTHER, "Not metered in this dataset")],
 }
 LAYER_NAMES = {"unusual": "Unusual hours", "change": "vs last week", "wifi": "Wi-Fi activity"}
+# During the replay the change layer compares each day with a typical same weekday instead.
+REPLAY_LEGENDS = {
+    "change": ("vs a typical same weekday",
+               [("#e66767", "25% or more above"), ("#5b6478", "About typical"),
+                ("#3987e5", "25% or more below"), (NO_DATA, "No typical day to compare")]),
+}
 
 
 # ----------------------------------------------------------------- replay
@@ -250,7 +256,8 @@ def payload(buildings, campus, status, week_label, replay=None):
         "bounds": bounds,
         "features": {"type": "FeatureCollection", "features": features},
         "campus": {"type": "FeatureCollection", "features": campus},
-        "layers": [{"id": k, "name": v, "legend": LEGENDS[k]} for k, v in LAYER_NAMES.items()],
+        "layers": [{"id": k, "name": v, "legend": LEGENDS[k],
+                    "replay": REPLAY_LEGENDS.get(k)} for k, v in LAYER_NAMES.items()],
         "week": week_label,
         "timeline": replay,
     }
@@ -516,6 +523,11 @@ function showDay(state, i) {
     el.style.setProperty("--c", color);
     el.innerHTML = `${el.dataset.b}<small>${label}</small>`;
   });
+  const L = state.data.layers.find(l => l.id === state.layer);
+  if (L.replay) {   // this layer means something different day by day: say so in the legend
+    root.querySelector(".nx-legend").innerHTML = `<h4>${L.replay[0]}</h4>` +
+      L.replay[1].map(([c, t]) => `<div><i style="background:${c}"></i>${t}</div>`).join("");
+  }
   declutter(state);
 }
 

@@ -99,8 +99,10 @@ def notice(ds):
     """Where the data on screen comes from, always visible."""
     if ds.name == IIITD:
         text = "Public IIIT-Delhi data. <b>Not PES data.</b>"
-    else:
+    elif ds.source.startswith("Public sample"):
         text = f"{html.escape(ds.source)} <b>Not PES data.</b>"
+    else:
+        text = html.escape(ds.source)
     st.html(f'<div class="nx-notice"><span>{text}</span></div>')
 
 
@@ -141,8 +143,8 @@ def top_bar():
 
     ds = common.dataset()
     last = common.last_full_day().date()
-    first = (ds.first + pd.Timedelta(days=14)).date()
     latest = ds.last.date()
+    first = min((ds.first + pd.Timedelta(days=14)).date(), latest)
     key = week_key()
     chosen = st.session_state.get(key)
     if chosen is not None and not first <= chosen <= latest:

@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 
 import pandas as pd
 
+from nexus.insights import in_service
 from nexus.kpis import HOURS_PER_WEEK, compare, window
 from nexus.recommend import OUT_OF_HOURS
 
@@ -72,6 +73,10 @@ def attention(df, events, recs, week_end):
         high=("flag", lambda f: int((f == "high").sum())),
         low=("flag", lambda f: int((f == "low").sum())),
         recorded=("kwh", "count"))
+    t = t.reindex(in_service(df, week_end), fill_value=0).astype(int)
+    if t.empty:
+        return Answer(QUESTIONS["attention"], "Insufficient data: no meter was in service in this "
+                      "week. Pick another week at the top.")
     t["missing"] = HOURS_PER_WEEK - t["recorded"]
     t["checks"] = t.index.map(recs["building"].value_counts()).fillna(0).astype(int)
     t = t.sort_values(["high", "missing", "checks"], ascending=False)
@@ -120,10 +125,14 @@ def trend(df, week_end):
     t = pd.DataFrame(rows).sort_values("Change %", ascending=False)
     total = t["Last 4 weeks, kWh"].sum() / t["Same weeks a year earlier, kWh"].sum() - 1
     up, down = t.iloc[0], t.iloc[-1]
+    parts = []
+    if up["Change %"] > 0:
+        parts.append(f"Biggest rise: **{up['Building']}** ({up['Change %']:+.0f}%).")
+    if down["Change %"] < 0:
+        parts.append(f"Biggest fall: **{down['Building']}** ({down['Change %']:+.0f}%).")
     text = (f"Over the 4 weeks to {pd.Timestamp(week_end):%-d %b %Y}, campus electricity was "
             f"**{abs(total):.0%} {'higher' if total >= 0 else 'lower'}** than the same weeks a year "
-            f"earlier. Biggest rise: **{up['Building']}** ({up['Change %']:+.0f}%). Biggest fall: "
-            f"**{down['Building']}** ({down['Change %']:+.0f}%).")
+            "earlier. " + " ".join(parts or ["No building changed."]))
     return Answer(QUESTIONS["trend"], text, t,
                   "Hour-for-hour comparison with the same weekdays 52 weeks earlier, counting only "
                   "hours recorded in both years. Weather and term dates differ between years; the "
@@ -169,7 +178,8 @@ def why(df, events, occ, recs, week_end, building):
                             if (c["change"] or 0) > 0.05 else ""))
     mine = recs[recs["building"] == building]
     if not mine.empty:
-        lines.append("\n**Things to check** (from Recommendations):")
+        lines.append("\n**Standing checks** (from Recommendations, across all the data, not only "
+                     "this week):")
         lines += [f"- {r.next_step}" for r in mine.head(3).itertuples()]
     table = None
     if not flagged.empty:
@@ -210,7 +220,7 @@ def outlook(fc, skipped, change, week_end):
                   "first forecast day.", ["Predictive Intelligence"])
 
 
-def savings(summary, share=0.2, tariff=None, factor=None):
+def savings(summary, share=0.2, tariff=None, factor=None, has_calendar=True):
     q = QUESTIONS["save"]
     if summary is None or summary.empty:
         return Answer(q, "This college has no occupancy data, so NEXUS cannot tell when buildings "
@@ -245,12 +255,14 @@ def savings(summary, share=0.2, tariff=None, factor=None):
             "of savings: only a site check can say what can be switched off.")
     return Answer(q, text, t,
                   "Near-empty = under 10% of the building's usual peak of people on Wi-Fi; busy = "
-                  "at least 50%. Semester weeks only. kWh in those hours = median near-empty kWh/h "
+                  "at least 50%. " + ("Semester weeks only. " if has_calendar else
+                                        "No calendar was uploaded, so all weeks are used. ")
+                  + "kWh in those hours = median near-empty kWh/h "
                   "x number of near-empty hours with readings. The reduction is your assumption.",
                   ["Institutional Intelligence", "Recommendations"])
 
 
-def underused(summary):
+def underused(summary, has_calendar=True):
     q = QUESTIONS["underused"]
     if summary is None or summary.empty:
         return Answer(q, "This college has no occupancy data, so NEXUS cannot tell how much "
@@ -269,5 +281,6 @@ def underused(summary):
         "Class hours": t["class_hours"]})
     return Answer(q, text, table,
                   "Near-empty = under 10% of the building's own usual peak (its 95th-percentile "
-                  "hour). Semester weeks come from the academic calendar.",
+                  "hour). " + ("Semester weeks come from the academic calendar." if has_calendar else
+                               "No calendar was uploaded, so every week is treated as a teaching week."),
                   ["Institutional Intelligence"])

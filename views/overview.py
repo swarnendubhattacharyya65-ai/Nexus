@@ -56,9 +56,9 @@ def _cards(snap, ds):
                   delta_color="inverse", delta_description="vs last week", border=True,
                   chart_data=_spark(snap["energy_daily"]), chart_type="area",
                   help="Hour-for-hour comparison with the 7 days before, using only "
-                       f"building-hours recorded in both weeks ({e['coverage']:.0%}). Lecture is "
-                       "excluded (unreliable meter). Sparkline: average kWh per building-hour, "
-                       "each day for 4 weeks.")
+                       f"building-hours recorded in both weeks ({e['coverage']:.0%})."
+                       + (f" Not counted (unreliable meter): {', '.join(ds.warnings)}." if ds.warnings else "")
+                       + " Sparkline: average kWh per building-hour, each day for 4 weeks.")
     if w["change"] is None:
         occ = ds.occupancy
         c2.metric("People on Wi-Fi", "No data", border=True,
@@ -66,13 +66,15 @@ def _cards(snap, ds):
                         f"Wi-Fi counts cover {occ['hour'].min():%d %b %Y} to "
                         f"{occ['hour'].max():%d %b %Y}. Pick a week inside that range."))
     else:
-        c2.metric("People on Wi-Fi", f"{w['this'] / HOURS_PER_WEEK:,.0f} avg", f"{w['change']:+.0%}",
+        avg, used = snap["wifi_avg"]
+        c2.metric("People on Wi-Fi", f"{avg:,.0f} avg" if avg is not None else "Partial data",
+                  f"{w['change']:+.0%}",
                   delta_color="off", delta_description="vs last week", border=True,
                   chart_data=_spark(snap["wifi_daily"]), chart_type="area",
                   help="Estimated people connected across all buildings, averaged over the "
-                       "week's hours. Wi-Fi counts devices, not exact people. Compared hour for "
-                       f"hour with the week before ({w['coverage']:.0%} of building-hours "
-                       "comparable).")
+                       f"hours when every building reported ({used:.0%} of the week). Wi-Fi counts "
+                       "devices, not exact people. The change compares the same building-hours "
+                       f"with the week before ({w['coverage']:.0%} comparable).")
     diff = snap["events"] - snap["events_prev"]
     c3.metric("Unusual events", f"{snap['events']}", f"{diff:+d}" if diff else "no change",
               delta_arrow="auto" if diff else "off",

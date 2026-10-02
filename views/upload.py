@@ -19,6 +19,11 @@ def _add(name, raw, calendar=None, source=""):
     except importer.ImportProblem as e:
         st.session_state["import_result"] = {"name": name, "problem": str(e)}
         return
+    except Exception as e:   # anything the checks did not foresee: say so, don't crash
+        st.session_state["import_result"] = {
+            "name": name, "problem": f"The file could not be read ({type(e).__name__}: {e}). "
+                                     "Check it against the template and try again."}
+        return
     common.uploads()[name] = {"dataset": ds, "report": report}
     st.session_state["import_result"] = {"name": name, "report": report}
     st.session_state["college"] = name
@@ -67,8 +72,8 @@ def report_view(report):
     c4.metric("Buildings", len(report["buildings"]))
     start, end = report["period"]
     st.caption(f"Energy column read as {report['unit']}. Period {start:%d %b %Y} to {end:%d %b %Y}. "
-               "An hour counts only if at least 75% of its readings are present; nothing is "
-               "filled in.")
+               "An hour counts only if at least 75% of its readings are present, and is then "
+               "scaled to the full hour; hours with fewer are left blank.")
     if report["rejected"]:
         st.dataframe(pd.DataFrame(list(report["rejected"].items()),
                                   columns=["Why a row was set aside", "Rows"]), hide_index=True)
@@ -82,8 +87,9 @@ def report_view(report):
 
 
 def show():
-    st.markdown("Run NEXUS on another college's meter data. Files stay in this browser session "
-                "only: nothing is saved, and reloading the page clears them.")
+    st.markdown("Run NEXUS on another college's meter data. Uploaded files are sent to the NEXUS "
+                "server and kept in its memory for your session only: they are not written to "
+                "disk or shown to other visitors, and reloading the page clears them.")
 
     # ------------------------------------------------------------ sample
     st.subheader("Try it with a public sample")

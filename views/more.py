@@ -19,7 +19,7 @@ def _store(key):
 def settings():
     st.subheader("Money and carbon")
     st.markdown("NEXUS shows kWh by default. Add your own figures to see rupees and CO₂ in Ask "
-                "NEXUS and in Reports. They stay in this browser session and are always shown "
+                "NEXUS and in Reports. They are kept for this session only and are always shown "
                 "next to the result they produced.")
     c1, c2 = st.columns(2)
     c1.number_input("Electricity tariff, ₹ per kWh", min_value=0.0, step=0.5,
@@ -78,8 +78,9 @@ def _report_html(ds, snap, week_table, items, recs, week_events, tariff, factor)
 <style>{CSS}</style></head><body>
 <h1>NEXUS week report: {html.escape(ds.name)}</h1>
 <p class="muted">{html.escape(h['when'])}. Made {datetime.now():%d %b %Y %H:%M}.</p>
-<p class="note">{html.escape(ds.source)} Not PES data. Every number below is calculated by
-NEXUS's code from the data; flags are measured differences, not diagnosed causes.</p>
+<p class="note">{html.escape(ds.source)}{' Not PES data.' if ds.name == common.IIITD or ds.source.startswith('Public sample') else ''}
+Every number below is calculated by NEXUS's code from the data; flags are measured differences,
+not diagnosed causes.</p>
 <h2>The week</h2><p><b>{html.escape(h['main'])}</b> {html.escape(' '.join(h['details']))}</p>{money}
 <h2>Buildings</h2>{week_table.to_html(index=False, na_rep="-")}
 <h2>Key insights</h2><ul>{''.join(lines) or '<li>Nothing stood out this week.</li>'}</ul>
@@ -151,17 +152,19 @@ HELP = [
      "busy is at least half of it, near-empty is under 10%. There are no room capacities in the "
      "data, so these are not room-use rates."),
     ("How good are the forecasts?",
-     "Each building's method was chosen on the earlier years and scored on the last year, which "
-     "it never saw. Predictive Intelligence shows the error for every building, including where "
-     "the simple rule did better."),
+     "Each building's method was chosen using forecast days before the last year of data, then "
+     "scored on forecasts made in that last year. Predictive Intelligence shows the error for "
+     "every building, including where the simple rule did better."),
     ("Where do the map's buildings come from?",
      "OpenStreetMap outlines of today's campus. Five I-BLEND buildings are matched (four by name, "
      "Dining by use); Lecture and Facilities are not identified there, so they are left off."),
     ("Is uploaded data stored?",
-     "No. It stays in your browser session and disappears when you reload or close the page."),
+     "It is sent to the NEXUS server and kept in its memory for your session only. It is not "
+     "written to disk or shown to other visitors, and it is cleared when you reload or close "
+     "the page."),
     ("Why no rupees by default?",
-     "The dataset has no tariff. Add yours in Settings and NEXUS shows rupees next to the kWh, "
-     "labelled as your figure."),
+     "The data has no tariff. Add yours in Settings and Ask NEXUS and Reports show rupees next "
+     "to the kWh, labelled as your figure."),
 ]
 
 

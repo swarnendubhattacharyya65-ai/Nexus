@@ -25,6 +25,8 @@ TEST_FROM = pd.Timestamp("2017-01-01")   # IIIT-Delhi; other colleges: see test_
 BAND = (0.10, 0.90)                # the 80% range around a forecast
 MIN_TEST_DAYS = 100                # fewer test days -> "insufficient data"
 METHODS = {"naive": "Same weekday last week", "calendar": "Calendar day type"}
+COLUMNS = ["building", "method", "test_days", "mae_naive", "mae_calendar", "error_pct", "skill",
+           "band_low", "band_high", "band_coverage", "train_period", "test_period", "note"]
 
 
 def daily_energy(ds=None):
@@ -41,9 +43,10 @@ def day_types(ds=None):
     """Each calendar date's day type."""
     cal = pd.read_parquet(OUT / "calendar.parquet") if ds is None else ds.calendar
     working = cal["working_day"].astype(bool)
+    weekday = "Break weekday" if ds is None or ds.has_calendar else "Weekday"   # no calendar: no terms
     kind = np.select(
         [working & (cal["activity"] == "high"), working, cal["date"].dt.dayofweek == 5],
-        ["Semester weekday", "Break weekday", "Saturday"], "Sunday or holiday")
+        ["Semester weekday", weekday, "Saturday"], "Sunday or holiday")
     return pd.Series(kind, index=cal["date"])
 
 
@@ -139,7 +142,8 @@ def evaluate(bt):
     split = test_start(bt)
     train_label, test_label = periods(bt)
     for building, g in bt.groupby("building"):
-        train, test = g[g["origin"] < split], g[g["origin"] >= split]
+        # Training uses only forecast days before the test year; the test uses forecasts made in it.
+        train, test = g[g["date"] < split], g[g["origin"] >= split]
         if len(test) < MIN_TEST_DAYS or len(train) < MIN_TEST_DAYS:
             rows.append({"building": building, "test_days": len(test),
                          "train_period": train_label, "test_period": test_label,
@@ -168,7 +172,7 @@ def evaluate(bt):
             "test_period": test_label,
             "note": "",
         })
-    return pd.DataFrame(rows)
+    return pd.DataFrame(rows, columns=COLUMNS)
 
 
 def main():

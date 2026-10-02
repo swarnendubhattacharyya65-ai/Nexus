@@ -22,6 +22,7 @@ class Dataset:
     occupancy: pd.DataFrame | None = None   # hour, building, occ_mean, occ_max
     warnings: dict = field(default_factory=dict)   # building -> why its energy is not analysed
     has_map: bool = False
+    has_calendar: bool = True                      # False: weekdays only, no terms or holidays
     notes: list = field(default_factory=list)      # limitations specific to this college
 
     @property
@@ -61,6 +62,7 @@ def calendar_for(energy, uploaded=None):
         return cal
     up = uploaded.copy()
     up["date"] = pd.to_datetime(up["date"]).dt.normalize()
+    up = up.drop_duplicates("date", keep="first")
     cal = cal.merge(up, on="date", how="left")
     cal["working_day"] = cal["working_day"].fillna(cal["date"].dt.dayofweek < 5).astype(bool)
     cal["activity"] = cal["activity"].fillna("low").astype(str).str.lower()

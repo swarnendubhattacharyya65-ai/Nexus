@@ -26,8 +26,8 @@ visit can take a minute to wake up).
 
 Every number is calculated by the code in `nexus/`, not typed in. Where there is not
 enough data, the app says "Insufficient data" instead of guessing. Recommendations are
-things to check, not diagnosed causes. No money values are shown because the dataset
-has no electricity tariff.
+things to check, not diagnosed causes. The data has no electricity tariff, so money
+appears only after you enter your own tariff in Settings, and is labelled as yours.
 
 ## Setup
 Needs Python 3.11 or newer (developed in GitHub Codespaces with Python 3.14).
@@ -123,7 +123,8 @@ All thresholds are named constants at the top of each file in `nexus/`.
 `Add college data` takes one CSV of meter readings (`timestamp`, `building`, and one of
 `kwh`, `kw` or `w`; optional `people`) and an optional calendar. `nexus/importer.py`
 checks every row, turns readings into hourly kWh with the same 75% rule, and reports what
-it set aside and why. Uploads stay in the browser session and are never saved.
+it set aside and why. Uploaded files go to the NEXUS server and are kept in its memory for
+that visitor's session only; they are not written to disk or shown to other visitors.
 
 A public sample is included: 8 buildings from site Fox of the Building Data Genome
 Project 2 (a US university campus, 2016-2017, CC BY-SA 4.0); see `data/samples/README.md`.
@@ -152,7 +153,8 @@ cleaning decision and its evidence.
   after seeing the test year.
 - **The data ends in 2017.** Forecasts can only be checked against history, not used
   for the coming weeks.
-- **No tariff**, so no money or savings figures.
+- **No tariff in the data.** Rupees appear only from a tariff you enter in Settings; the
+  savings answer in Ask NEXUS is a what-if with a reduction you choose, not a forecast.
 - **First load is slow on free hosting.** The app calculates baselines and the forecast
   backtest when it starts, then caches them.
 - **No automated test suite yet.** Data checks run with `python -m nexus.data --check`.

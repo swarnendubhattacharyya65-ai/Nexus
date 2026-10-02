@@ -4,6 +4,7 @@ import pandas as pd
 import streamlit as st
 
 from nexus.resource import MIN_CHANGE, Z_LIMIT
+from views import common
 from views.common import ACTUAL, NEUTRAL as EXPECTED, UNUSUAL, events_table, legend
 
 
@@ -83,10 +84,12 @@ def show(df, events):
         m3.metric("Difference", f"{e['extra_kwh']:+,.0f} kWh", delta=f"{e['extra_pct']:+.0%}",
                   delta_color="inverse")
         st.markdown(
-            f"**{e['start']:%A %d %B %Y, %H:%M}** to **{e['end']:%a %d %b, %H:%M}** ({e['hours']} hours, "
-            f"{e['activity']}-activity day). Expected = the median of at least {e['samples']:.0f} "
-            "comparable hours: same hour of day, same day type and same academic activity, "
-            f"within 3 weeks either side. Flagged because each hour was more than {Z_LIMIT} times "
+            f"**{e['start']:%A %d %B %Y, %H:%M}** to **{e['end']:%a %d %b, %H:%M}** ({e['hours']} hours"
+            + (f", {e['activity']}-activity day" if common.dataset().has_calendar else "")
+            + f"). Expected = the median of at least {e['samples']:.0f} "
+            "comparable hours: same hour of day, same day type"
+            + (" and same academic activity, " if common.dataset().has_calendar else " (working or not), ")
+            + f"within 3 weeks either side. Flagged because each hour was more than {Z_LIMIT} times "
             f"the normal variation away and at least {MIN_CHANGE:.0%} different.")
 
         around = analysed[(analysed["building"] == building)
