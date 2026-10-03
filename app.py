@@ -3,12 +3,37 @@
 Run in the codespace:   streamlit run app.py
 Reads only the small tables in data/processed/, so it also runs when deployed.
 """
+import hashlib
+import sys
+import types
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 
-from nexus.data import OUT
+_ROOT = Path(__file__).resolve().parent
+_PACKAGES = ("nexus", "views")
+
+
+def _load_latest_code():
+    """Streamlit Cloud re-reads this file on every run but keeps the modules it imports in memory,
+    so after a git push the pages could go on running the old code until a reboot. When any file
+    in nexus/ or views/ has changed, forget those modules so they are imported fresh."""
+    h = hashlib.sha1()
+    for pkg in _PACKAGES:
+        for f in sorted((_ROOT / pkg).glob("*.py")):
+            h.update(f.name.encode())
+            h.update(f.read_bytes())
+    holder = sys.modules.setdefault("_nexus_code", types.ModuleType("_nexus_code"))
+    if getattr(holder, "fingerprint", None) != h.hexdigest():     # also true on the first run
+        for name in [m for m in sys.modules if m.split(".")[0] in _PACKAGES]:
+            del sys.modules[name]
+    holder.fingerprint = h.hexdigest()
+
+
+_load_latest_code()
+
+from nexus.data import OUT  # noqa: E402
 
 st.set_page_config(page_title="NEXUS", page_icon=":material/hub:", layout="wide")
 
