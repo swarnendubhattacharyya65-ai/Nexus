@@ -305,12 +305,14 @@ def show(df, events, snap):
 
     with check:
         st.subheader("What to check")
-        picks = pd.concat([recs[recs["kind"] == kind].head(1)
-                           for kind in ["Investigate", "Check data", "Plan"]])
+        ranked = recs.sort_values("at_stake_kwh", ascending=False, na_position="last")
+        picks = pd.concat([ranked[ranked["kind"] == kind].head(1)
+                           for kind in ["Save energy", "Investigate", "Fix data"]])
         if len(picks) < 3:
-            picks = pd.concat([picks, recs.drop(picks.index)]).head(3)
+            picks = pd.concat([picks, ranked.drop(picks.index)]).head(3)
         _bullets([f"**{r.title}, {r.building}.** {r.next_step}" for r in picks.itertuples()])
-        st.caption(f"Suggested checks, not diagnosed causes. All {len(recs)} in Recommendations.")
+        st.caption(f"First steps only. All {len(recs)} recommendations, with full solution plans, in "
+                   "Recommendations.")
 
     # --------------------------------------------------------------- detail
     st.subheader("Average energy per day")

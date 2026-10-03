@@ -147,10 +147,12 @@ def predictive():
 
 
 def _recommendations(ds):
-    _, events = load()
-    _, summary = institutional()
+    df, events = load()
+    occ, summary = institutional()
     daily, types, evaluation = predictive()
-    return build(events, summary, evaluation, daily, types, forecast, ds.calendar)
+    years = (occ["hour"].max() - occ["hour"].min()).days / 365.25 if occ is not None and len(occ) else None
+    return build(events, summary, evaluation, daily, types, forecast, ds.calendar,
+                 energy=df, warnings=ds.warnings, occ_years=years)
 
 
 def recommendations():

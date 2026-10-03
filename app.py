@@ -57,8 +57,9 @@ def predictive_page():
 
 def recommendations_page():
     shell.page_header("Recommendations",
-                      "Each suggestion comes from an explicit rule applied to the findings on "
-                      "the other pages, and shows the numbers behind it.")
+                      "Solutions ranked by the energy at stake. Each says what the data shows, what "
+                      "is at stake, and a step-by-step plan: causes to rule out, actions from no-cost "
+                      "to investment with who does each, and how to confirm it worked.")
     recommend.show()
 
 

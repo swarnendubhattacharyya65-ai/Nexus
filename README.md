@@ -16,7 +16,7 @@ visit can take a minute to wake up).
 | Resource Intelligence | Which hours used unusually more or less energy than normal? | Each hour vs a baseline of comparable hours |
 | Institutional Intelligence | When are buildings busy or near-empty, and do they still use energy when near-empty? | Wi-Fi occupancy estimates by hour and weekday |
 | Predictive Intelligence | How much energy will each building use over the 14 days after the data ends? | Two simple forecasts, tested on history (the test is in an expander, not the chart) |
-| Recommendations | What should someone check next? | Explicit rules applied to the findings above |
+| Recommendations | What should we do, and what is it worth? | Explicit rules on the data, plus a solution plan for each |
 | Campus Map | Where on campus is something happening this week? | Real building outlines in 3D, coloured by the week's findings, with a day-by-day replay of the 12 weeks to the chosen date |
 | Reports | Can I share this week's findings? | A printable week report (HTML) and CSV downloads |
 | Ask NEXUS | Any question, in a continuing conversation | Claude, with lookup tools over NEXUS's own tables (needs an API key); a no-AI "Quick answers" tab uses fixed rules |
@@ -26,8 +26,8 @@ visit can take a minute to wake up).
 | Data & method | Where the data comes from and every cleaning decision | Shows `DATA.md`, or the import checks for an uploaded college |
 
 Every number is calculated by the code in `nexus/`, not typed in. Where there is not
-enough data, the app says "Insufficient data" instead of guessing. Recommendations are
-things to check, not diagnosed causes. The data has no electricity tariff, so money
+enough data, the app says "Insufficient data" instead of guessing. Recommendations come
+with causes to rule out, not diagnoses, and savings are a scenario you set, not a promise. The data has no electricity tariff, so money
 appears only after you enter your own tariff in Settings, and is labelled as yours.
 
 ## Setup
@@ -83,7 +83,8 @@ nexus/data.py            Raw files -> hourly tables in data/processed/, plus dat
 nexus/resource.py        Baselines and unusual events
 nexus/institutional.py   Occupancy patterns and energy when near-empty
 nexus/predictive.py      Forecasts and backtest
-nexus/recommend.py       Recommendation rules R1-R5
+nexus/recommend.py       Recommendation rules R1-R9 and what is at stake
+nexus/playbook.py        Solution plans: causes to rule out, staged actions, how to check
 nexus/kpis.py            Week-on-week cards and the Overview headline
 nexus/insights.py        Overview panels: insights feed, 30-day trend, building hours, 2-week outlook
 nexus/ask.py             Quick answers: question routing and rule-based answers
@@ -121,8 +122,13 @@ All thresholds are named constants at the top of each file in `nexus/`.
 - **Week cards (Overview):** the 7 days ending on the chosen date vs the 7 days before,
   hour for hour, counting only building-hours recorded in both weeks. Fewer than 50%
   comparable hours gives "Insufficient data".
-- **Recommendations:** five explicit rules (R1-R5), each shown in the app with its
-  threshold, the finding that triggered it and the evidence.
+- **Recommendations:** nine explicit rules (R1-R9), each shown in the app with its
+  threshold, the finding that triggered it and the evidence. R6-R9 look at the last 12 months:
+  always-on load, use on days off (not residences or dining halls), the campus peak hour, and
+  the seasonal swing. Each recommendation states the energy at stake from the data, and the
+  app multiplies it by a reduction the person sets (default 20%). Causes and actions come from
+  general building-energy practice in `nexus/playbook.py`, adapted to the building's type,
+  which is guessed from its name.
 
 ## Chatbot setup
 The conversation needs an API key, added in the app's secrets (Streamlit Cloud: Manage app,

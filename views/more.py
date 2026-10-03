@@ -47,6 +47,10 @@ def settings():
         ("Recommendations", "Unusual use worth a check (R1)", f"{recommend.EVENT_MIN_HOURS}+ hours, {recommend.EVENT_MIN_EXTRA:.0%}+ above expected"),
         ("Recommendations", "High use when near-empty (R3)", f"{recommend.QUIET_RATIO:.0%}+ of busy-hour energy"),
         ("Recommendations", "Forecast differs from last year (R4)", f"{recommend.PLAN_CHANGE:.0%}+"),
+        ("Recommendations", "Large always-on load (R6)", f"overnight minimum = {recommend.BASE_SHARE:.0%}+ of the year's energy"),
+        ("Recommendations", "Running on days off (R7)", f"a day off uses {recommend.OFF_RATIO:.0%}+ of a working day"),
+        ("Recommendations", "Campus peak demand (R8)", f"highest hour {recommend.PEAK_OVER:.0%}+ above the 95th-percentile hour"),
+        ("Recommendations", "Big seasonal swing (R9)", f"3 highest months add {recommend.SEASON_SHARE:.0%}+ to the year"),
     ]
     st.dataframe(pd.DataFrame(rows, columns=["Area", "Setting", "Value"]), hide_index=True)
 
@@ -86,7 +90,7 @@ not diagnosed causes.</p>
 <h2>Key insights</h2><ul>{''.join(lines) or '<li>Nothing stood out this week.</li>'}</ul>
 <h2>Higher-than-usual events this week</h2>
 {week_events.to_html(index=False) if not week_events.empty else '<p>None.</p>'}
-<h2>Suggested checks</h2>
+<h2>Recommendations (first steps)</h2>
 {recs[['title', 'building', 'finding', 'next_step']].rename(columns=str.capitalize).to_html(index=False) if not recs.empty else '<p>None.</p>'}
 <p class="muted">Method: each hour is compared with the median of comparable hours (same hour,
 day type and academic activity, 3 weeks either side); week figures compare the same hours in
@@ -117,7 +121,10 @@ def reports(week_end):
                        help="Opens in any browser; use Print to save it as a PDF.")
     c2.download_button("All unusual events (CSV)", common.events_table(events).to_csv(index=False),
                        "nexus-events.csv", "text/csv", icon=":material/table:")
-    c3.download_button("Suggested checks (CSV)", recs.drop(columns=["size"], errors="ignore").to_csv(index=False),
+    flat = recs.drop(columns=["size"], errors="ignore").assign(
+        causes=recs["causes"].map("; ".join),
+        actions=recs["actions"].map(lambda a: " | ".join(f"{s}: {w} ({who})" for s, w, who in a)))
+    c3.download_button("Recommendations (CSV)", flat.to_csv(index=False),
                        "nexus-checks.csv", "text/csv", icon=":material/checklist:")
 
     st.subheader("Preview")
