@@ -1,0 +1,6 @@
+nexus_building,osm_id,osm_name,how_matched
+Academic,way/1385562818,IIIT Delhi Academic Block,"Name. The R&D Block is the newer academic building (Phase II, open from Aug 2017), so the I-BLEND Academic building (2013-2017) is the older Academic Block."
+Library,way/1292565172,IIIT Delhi Library,Name.
+Girls dorm,way/228747532,Girls Hostel,Name.
+Boys dorm,way/228772270,Old Boys Hostel,"Name. The New Boys Hostel is a Phase II building (hostel H1 opened Feb 2018), after the data period."
+Dining,way/228747533,Student Center,"Inferred from use, not name: I-BLEND describes the dining building as a cafeteria, dining floor, computer labs and a gym floor; OpenStreetMap names no dining building and the Student Center houses the food outlets."

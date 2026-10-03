@@ -17,15 +17,18 @@ MIN_CHANGE = 0.10   # ...and it must also be at least 10% away from expected
 MIN_SPREAD = 0.1    # kWh; stops perfectly steady hours from dividing by zero
 
 
-def load_energy():
-    """Hourly kWh per building joined with that day's calendar."""
-    energy = pd.read_parquet(OUT / "energy_hourly.parquet")
-    cal = pd.read_parquet(OUT / "calendar.parquet")
+def load_energy(ds=None):
+    """Hourly kWh per building joined with that day's calendar (IIIT-Delhi unless a Dataset is given)."""
+    if ds is None:
+        energy = pd.read_parquet(OUT / "energy_hourly.parquet")
+        cal = pd.read_parquet(OUT / "calendar.parquet")
+    else:
+        energy, cal = ds.energy.copy(), ds.calendar
     energy["date"] = energy["hour"].dt.normalize()
     return energy.merge(cal, on="date", how="left")
 
 
-def add_baseline(energy):
+def add_baseline(energy, warnings=None):
     """Add the expected kWh for every hour, and flag hours far from it.
 
     Expected = the median of comparable hours within 3 weeks either side.
@@ -62,7 +65,8 @@ def add_baseline(energy):
     df.loc[has_baseline & (df["z"] >= Z_LIMIT) & (change >= MIN_CHANGE), "flag"] = "high"
     df.loc[has_baseline & (df["z"] <= -Z_LIMIT) & (change <= -MIN_CHANGE), "flag"] = "low"
     df.loc[~has_baseline, "flag"] = "no baseline"
-    df.loc[df["building"].isin(ENERGY_WARNINGS), "flag"] = "unreliable meter"
+    unreliable = ENERGY_WARNINGS if warnings is None else warnings
+    df.loc[df["building"].isin(unreliable), "flag"] = "unreliable meter"
     return df
 
 

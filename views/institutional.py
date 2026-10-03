@@ -3,25 +3,20 @@ import altair as alt
 import streamlit as st
 
 from nexus.institutional import (BUSY, BUSY_LEVEL, DAYS, MIN_HOURS, MIN_QUIET_SHARE, QUIET,
-                                 building_summary, load_occupancy, weekly_profile)
+                                 weekly_profile)
+from views import common
+from views.common import ACTUAL as BLUE
 
-BLUE = "#2a78d6"
-# One-hue ramp for the heatmap; the quiet end fades into the page background.
-RAMP_LIGHT = ["#cde2fb", "#86b6ef", "#3987e5", "#1c5cab", "#0d366b"]
-RAMP_DARK = ["#0d366b", "#1c5cab", "#3987e5", "#86b6ef", "#cde2fb"]
-
-
-@st.cache_data(show_spinner="Reading occupancy ...")
-def _data():
-    occ = load_occupancy()
-    return occ, building_summary(occ)
+# One-hue ramp for the heatmap; the quiet end fades into the navy page.
+RAMP = ["#0d366b", "#1c5cab", "#3987e5", "#86b6ef", "#cde2fb"]
 
 
 def show():
-    occ, summary = _data()
-    st.caption("Building-level patterns from Wi-Fi connection counts. The data has no rooms, "
-               "timetables or capacities, so NEXUS does not report a utilization rate: each "
-               "building is compared with its own busiest hours instead.")
+    occ, summary = common.institutional()
+    if occ is None:
+        st.info("This college's data has no people or Wi-Fi counts, so occupancy patterns "
+                "cannot be shown. Add a people column to the upload to use this page.")
+        return
 
     # ------------------------------------------------------------ findings
     st.subheader("Findings")
@@ -55,20 +50,20 @@ def show():
     if profile.empty:
         st.info("Insufficient data for this building and period.")
     else:
-        dark = st.context.theme.type == "dark"
         heat = alt.Chart(profile).mark_rect(cornerRadius=2).encode(
             x=alt.X("hour_of_day:O", title="Hour of day",
                     scale=alt.Scale(paddingInner=0.08), axis=alt.Axis(labelAngle=0)),
             y=alt.Y("day:O", sort=DAYS, title=None, scale=alt.Scale(paddingInner=0.08)),
             color=alt.Color("people:Q", title="People (median)",
-                            scale=alt.Scale(range=RAMP_DARK if dark else RAMP_LIGHT, domainMin=0)),
+                            scale=alt.Scale(range=RAMP, domainMin=0)),
             tooltip=[alt.Tooltip("day:N", title="Day"),
                      alt.Tooltip("hour_of_day:O", title="Hour"),
                      alt.Tooltip("people:Q", title="People (median)", format=",.0f"),
                      alt.Tooltip("hours:Q", title="Hours of data")],
         ).properties(height=260)
         st.altair_chart(heat, width="stretch")
-        st.caption("Median estimated people for each hour of the week, 2014-2017.")
+        st.caption(f"Median estimated people for each hour of the week, "
+                   f"{occ['hour'].min():%Y}-{occ['hour'].max():%Y}.")
 
     # ------------------------------------------------- energy when quiet
     st.subheader("Energy when near-empty")

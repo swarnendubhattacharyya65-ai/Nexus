@@ -18,10 +18,13 @@ MIN_QUIET_SHARE = 0.10  # near-empty in fewer hours than this -> not compared
 DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
 
-def load_occupancy():
+def load_occupancy(ds=None):
     """Hourly people estimates joined with the calendar. Blank hours are dropped."""
-    occ = pd.read_parquet(OUT / "occupancy_hourly.parquet")
-    cal = pd.read_parquet(OUT / "calendar.parquet")
+    if ds is None:
+        occ = pd.read_parquet(OUT / "occupancy_hourly.parquet")
+        cal = pd.read_parquet(OUT / "calendar.parquet")
+    else:
+        occ, cal = ds.occupancy.copy(), ds.calendar
     occ["date"] = occ["hour"].dt.normalize()
     occ = occ.merge(cal, on="date", how="left")
     return occ.dropna(subset=["occ_mean", "semester_week"])
@@ -36,13 +39,14 @@ def weekly_profile(occ, building, semester):
         people=("occ_mean", "median"), hours=("occ_mean", "size"))
 
 
-def building_summary(occ):
+def building_summary(occ, ds=None):
     """One row per building: how busy it gets, when it is quiet, and its energy then.
 
     Energy is compared within semester weeks only, so that long holidays do
     not make quiet hours look cheaper than they are.
     """
-    energy = pd.read_parquet(OUT / "energy_hourly.parquet")
+    energy = pd.read_parquet(OUT / "energy_hourly.parquet") if ds is None else ds.energy
+    unreliable = ENERGY_WARNINGS if ds is None else ds.warnings
     both = occ.merge(energy, on=["hour", "building"], how="left")
     rows = []
     for building, g in both.groupby("building"):
@@ -55,7 +59,7 @@ def building_summary(occ):
 
         quiet_kwh = g.loc[semester & quiet, "kwh"].dropna()
         busy_kwh = g.loc[semester & busy, "kwh"].dropna()
-        if building in ENERGY_WARNINGS:
+        if building in unreliable:
             note = "Energy meter unreliable"
         elif quiet.mean() < MIN_QUIET_SHARE:
             note = (f"Rarely near-empty ({quiet.mean():.0%} of hours), so a quiet reading "

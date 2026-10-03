@@ -2,3 +2,5 @@ streamlit==1.64.0
 pandas==3.0.6
 altair==6.3.0
 pyarrow==25.0.1
+anthropic>=0.40,<2
+requests>=2.31
