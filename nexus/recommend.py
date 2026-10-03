@@ -50,20 +50,20 @@ RULES = [
     ("R3", "Save energy", "High use when near-empty",
      f"Near-empty hours use at least {QUIET_RATIO:.0%} of the energy of busy hours."),
     ("R4", "Plan", "Forecast differs from last year",
-     f"The latest forecast (the last 14 days of the data) is at least {PLAN_CHANGE:.0%} above "
+     f"The forecast for the 14 days after the selected week is at least {PLAN_CHANGE:.0%} above "
      "or below the same 14 days a year earlier."),
     ("R5", "Plan", "Less reliable forecast",
      f"In the test year the forecast missed by more than {FORECAST_MAX_ERROR:.0%} of a typical "
-     "day, or did worse than the simple rule."),
+     "day, or did worse than the simple rule (about the method, so the same for every date)."),
     ("R6", "Save energy", "Large always-on load",
-     f"In the last {YEAR_DAYS} days, the building's overnight minimum (its {BASE_QUANTILE:.0%} lowest "
+     f"In the 12 months to the selected week, the building's overnight minimum (its {BASE_QUANTILE:.0%} lowest "
      f"hours) running all day adds up to at least {BASE_SHARE:.0%} of its energy."),
     ("R7", "Save energy", "Running on days off",
-     f"A non-working day uses at least {OFF_RATIO:.0%} of a working day's energy (last {YEAR_DAYS} days; "
+     f"A non-working day uses at least {OFF_RATIO:.0%} of a working day's energy (12 months to the selected week; "
      "not applied to residences or dining halls, which are meant to run every day)."),
     ("R8", "Cut peak", "Campus peak demand",
      f"The campus's highest hour is at least {PEAK_OVER:.0%} above its 95th-percentile hour "
-     f"(last {YEAR_DAYS} days, buildings with reliable meters)."),
+     f"(12 months to the selected week, buildings with reliable meters)."),
     ("R9", "Save energy", "Big seasonal swing",
      f"The 3 highest months add at least {SEASON_SHARE:.0%} to the year's energy compared with "
      "running all year at the 3 lowest months' level."),
@@ -92,11 +92,14 @@ def _out_of_hours_share(start, end, working):
     return float(off.to_numpy().mean())
 
 
-def from_events(events, calendar=None):
-    """R1 and R2, from Resource Intelligence events."""
+def from_events(events, calendar=None, as_of=None):
+    """R1 and R2, from Resource Intelligence events (only those starting in the window when `as_of` is set)."""
     cal = pd.read_parquet(OUT / "calendar.parquet") if calendar is None else calendar
     working = dict(zip(cal["date"], cal["working_day"]))
     recs = []
+    if as_of is not None and len(events):
+        start, end = window(as_of)
+        events = events[(events["start"] >= start) & (events["start"] < end)]
 
     high = events[(events["direction"] == "high") & (events["hours"] >= EVENT_MIN_HOURS)
                   & (events["extra_pct"] >= EVENT_MIN_EXTRA)]
@@ -109,7 +112,7 @@ def from_events(events, calendar=None):
         if len(same) >= REPEAT_MIN:
             day = same["start"].dt.day_name().mode().iloc[0]
             n_day = int((same["start"].dt.day_name() == day).sum())
-            repeat = f" It is one of {len(same)} such events in {e.building} in the data"
+            repeat = f" It is one of {len(same)} such events in {e.building} in these 12 months"
             repeat += (f"; {n_day} of them started on a {day}, so check weekly schedules first."
                        if n_day / len(same) >= REPEAT_SAME_DAY else ".")
         recs.append(_rec(
@@ -120,7 +123,7 @@ def from_events(events, calendar=None):
             e.extra_kwh,
             pb.unusual_high(e.building, when, f"{e.start:%A}", out_of_hours, extreme,
                             e.expected_kwh / e.hours),
-            e.extra_kwh, "extra energy in this one event", "once"))
+            e.extra_kwh, "extra in this one event", "once"))
 
     low = events[(events["direction"] == "low") & (events["hours"] >= LOW_MIN_HOURS)
                  & (events["extra_pct"] <= -LOW_MIN_DROP)]
@@ -142,8 +145,8 @@ def from_occupancy(summary, years=None):
     for r in ok.sort_values("quiet_vs_busy", ascending=False).itertuples():
         total = r.quiet_kwh * r.quiet_energy_hours
         per_year = total / years if years and years >= 0.5 else total
-        what = ("energy used per year while near-empty (semester weeks)" if years and years >= 0.5
-                else "energy used while near-empty, across the semester weeks in the data")
+        what = ("a year used while near-empty (semester weeks)" if years and years >= 0.5
+                else "used while near-empty, across the semester weeks in these 12 months")
         recs.append(_rec(
             "R3", r.building,
             f"Near-empty hours use {r.quiet_kwh:.1f} kWh/h, {r.quiet_vs_busy:.0%} of the {r.busy_kwh:.1f} "
@@ -155,8 +158,9 @@ def from_occupancy(summary, years=None):
     return recs
 
 
-def from_forecasts(evaluation, daily, types, forecast):
-    """R4 and R5, from Predictive Intelligence (latest forecast date per building)."""
+def from_forecasts(evaluation, daily, types, forecast, as_of=None):
+    """R4 and R5, from Predictive Intelligence. R4 forecasts the 14 days after `as_of` (default: the
+    latest 14 days with data); R5 is about the forecasting method, so it is the same for every date."""
     recs = []
     for r in evaluation[evaluation["note"] == ""].itertuples():
         if r.error_pct > FORECAST_MAX_ERROR or r.skill < 0:
@@ -168,7 +172,10 @@ def from_forecasts(evaluation, daily, types, forecast):
                              pb.unreliable_forecast(r.building)))
 
         s = daily[daily["building"] == r.building].set_index("date")["kwh"].sort_index()
-        origin = s.index.max() - pd.Timedelta(days=13)
+        origin = (s.index.max() - pd.Timedelta(days=13) if as_of is None
+                  else pd.Timestamp(as_of).normalize() + pd.Timedelta(days=1))
+        if len(s[s.index < origin]) < 28:
+            continue
         f = forecast(s, types, origin)
         f["forecast"] = f[r.method]
         year_ago = s.reindex(f["date"] - pd.Timedelta(days=364)).dropna()  # same weekdays
@@ -186,27 +193,37 @@ def from_forecasts(evaluation, daily, types, forecast):
             "R4", r.building,
             f"Forecast for {span}: {change:+.0%} vs the same weeks a year earlier "
             f"({f['forecast'].mean():,.0f} vs {year_ago.mean():,.0f} kWh/day, {diff:+,.0f} kWh over the 14 days).",
-            f"Forecast made on {origin:%d %b %Y}, the latest date with 14 days of data after it.{outcome} "
-            "See Predictive Intelligence.",
+            (f"Forecast made on {origin:%d %b %Y}, the latest date with 14 days of data after it."
+             if as_of is None else
+             f"Forecast for the 14 days after the selected week, from data up to {origin - pd.Timedelta(days=1):%d %b %Y}.")
+            + f"{outcome} See Predictive Intelligence.",
             abs(change), pb.plan_ahead(r.building, span, change > 0)))
     return recs
 
 
 # ------------------------------------------------------------ R6-R9: whole-year patterns
 
-def last_year(energy, warnings=None):
-    """The last 365 days of hourly readings, without buildings whose meter is flagged unreliable."""
+def window(as_of):
+    """The 365 days ending with the day `as_of` (the selected week's last day): [start, end)."""
+    end = pd.Timestamp(as_of).normalize() + pd.Timedelta(days=1)
+    return end - pd.Timedelta(days=YEAR_DAYS), end
+
+
+def last_year(energy, warnings=None, as_of=None):
+    """Hourly readings in the 365 days ending at `as_of` (default: the end of the data), without
+    buildings whose meter is flagged unreliable."""
     if energy is None or energy.empty:
         return pd.DataFrame()
     e = energy[~energy["building"].isin(list(warnings or {}))].dropna(subset=["kwh"])
     if e.empty:
         return e
-    return e[e["hour"] > e["hour"].max() - pd.Timedelta(days=YEAR_DAYS)].copy()
+    start, end = window(e["hour"].max() if as_of is None else as_of)
+    return e[(e["hour"] >= start) & (e["hour"] < end)].copy()
 
 
-def campus_year_kwh(energy, warnings=None):
-    """Energy of all reliable buildings over the last 365 days, each scaled to a full year."""
-    e = last_year(energy, warnings)
+def campus_year_kwh(energy, warnings=None, as_of=None):
+    """Energy of all reliable buildings over the 365 days ending at `as_of`, each scaled to a full year."""
+    e = last_year(energy, warnings, as_of)
     if e.empty:
         return None
     total = 0.0
@@ -227,9 +244,9 @@ def _months_label(months):
     return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
 
 
-def from_energy(energy, warnings=None):
+def from_energy(energy, warnings=None, as_of=None):
     """R6 always-on, R7 days off, R9 seasonal swing (per building) and R8 campus peak."""
-    e = last_year(energy, warnings)
+    e = last_year(energy, warnings, as_of)
     recs = []
     if e.empty:
         return recs
@@ -255,7 +272,7 @@ def from_energy(energy, warnings=None):
                 f"{total:,.0f} kWh a year).",
                 f"Minimum = the {BASE_QUANTILE:.0%} lowest hourly readings, {span}.{scaled}",
                 base_year, pb.always_on(b, btype, base),
-                base_year, "always-on energy per year"))
+                base_year, "a year of always-on energy"))
 
         # R7 days off (not residences or dining halls)
         if btype not in ("residence", "dining") and g["working_day"].notna().any():
@@ -276,7 +293,7 @@ def from_energy(energy, warnings=None):
                         f"{len(off)} non-working and {len(on)} working days, {span}; days off as marked in "
                         "the college calendar." + scaled,
                         stake, pb.days_off(b, ratio, _hours_label(busy)),
-                        stake, "days-off energy above the always-on minimum, per year"))
+                        stake, "a year used on days off, above the always-on minimum"))
 
         # R9 seasonal swing
         month = g.groupby(g["hour"].dt.month)
@@ -292,7 +309,7 @@ def from_energy(energy, warnings=None):
                     f"Those three months add about {extra:,.0f} kWh, {extra / total:.0%} of its year.",
                     f"Average day per calendar month, {span}. No weather data: cooling and term-time "
                     "activity both show up here." + scaled,
-                    extra, pb.seasonal(b, btype, hot_l, cool_l), extra, "extra energy in the peak months"))
+                    extra, pb.seasonal(b, btype, hot_l, cool_l), extra, "a year of extra energy in the peak months"))
 
     # R8 campus peak: hours where every included building has a reading
     n = e["building"].nunique()
@@ -321,15 +338,16 @@ def from_energy(energy, warnings=None):
                 f"Hourly totals of {n} buildings with reliable meters, {span}. kWh in an hour = average kW "
                 "over that hour; the instant peak on the bill can be higher.",
                 peak - p95, pb.campus_peak(_hours_label(top.index.hour), _months_label(sorted(months)), riser, p95),
-                shift, "energy to move out of peak hours, per year (not saved, shifted)", "shift"))
+                shift, "a year to move out of peak hours (shifted, not saved)", "shift"))
     return recs
 
 
 def build(events, summary, evaluation, daily, types, forecast, calendar=None, energy=None,
-          warnings=None, occ_years=None):
-    """All recommendations, grouped by rule and largest first within each rule."""
-    recs = (from_events(events, calendar) + from_occupancy(summary, occ_years)
-            + from_forecasts(evaluation, daily, types, forecast) + from_energy(energy, warnings))
+          warnings=None, occ_years=None, as_of=None):
+    """All recommendations for the 12 months ending at `as_of` (default: the end of the data),
+    grouped by rule and largest first within each rule. `summary` should cover the same window."""
+    recs = (from_events(events, calendar, as_of) + from_occupancy(summary, occ_years)
+            + from_forecasts(evaluation, daily, types, forecast, as_of) + from_energy(energy, warnings, as_of))
     if not recs:
         return pd.DataFrame(columns=COLUMNS)
     out = pd.DataFrame(recs)

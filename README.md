@@ -27,7 +27,7 @@ visit can take a minute to wake up).
 
 Every number is calculated by the code in `nexus/`, not typed in. Where there is not
 enough data, the app says "Insufficient data" instead of guessing. Recommendations come
-with causes to rule out, not diagnoses, and savings are a scenario you set, not a promise. The data has no electricity tariff, so money
+with causes to rule out, not diagnoses, and amounts are what was measured, never a promised saving. The data has no electricity tariff, so money
 appears only after you enter your own tariff in Settings, and is labelled as yours.
 
 ## Setup
@@ -123,10 +123,11 @@ All thresholds are named constants at the top of each file in `nexus/`.
   hour for hour, counting only building-hours recorded in both weeks. Fewer than 50%
   comparable hours gives "Insufficient data".
 - **Recommendations:** nine explicit rules (R1-R9), each shown in the app with its
-  threshold, the finding that triggered it and the evidence. R6-R9 look at the last 12 months:
-  always-on load, use on days off (not residences or dining halls), the campus peak hour, and
-  the seasonal swing. Each recommendation states the energy at stake from the data, and the
-  app multiplies it by a reduction the person sets (default 20%). Causes and actions come from
+  threshold, the finding that triggered it and the evidence. Every rule looks at the 12 months ending on the
+  Week ending date, so changing the date shows another year. R6-R9 cover always-on load, use on
+  days off (not residences or dining halls), the campus peak hour and the seasonal swing. Each
+  recommendation states the energy at stake, measured from the data, and what every 10% of it is
+  worth; NEXUS never guesses how much a fix will save. Causes and actions come from
   general building-energy practice in `nexus/playbook.py`, adapted to the building's type,
   which is guessed from its name.
 

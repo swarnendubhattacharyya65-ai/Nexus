@@ -10,7 +10,7 @@ from nexus.dataset import IIITD, iiitd
 from nexus.institutional import building_summary, load_occupancy
 from nexus.kpis import default_week_end, snapshot
 from nexus.predictive import backtest, daily_energy, day_types, evaluate, extend_types, forecast
-from nexus.recommend import build
+from nexus.recommend import build, window
 from nexus.resource import add_baseline, find_events, load_energy
 
 # Chart colours, stepped for the navy page (validated: contrast >= 3:1, colour-blind safe pair).
@@ -146,17 +146,32 @@ def predictive():
     return compute("predictive", _predictive, "Testing forecasts on past data ...")
 
 
-def _recommendations(ds):
+def selected_week_end():
+    """The 'Week ending' date chosen in the top bar (the latest full day if none is chosen yet)."""
+    chosen = st.session_state.get(f"week_end::{college()}")
+    return pd.Timestamp(chosen if chosen is not None else last_full_day())
+
+
+def _recommendations(ds, as_of):
     df, events = load()
-    occ, summary = institutional()
+    occ, _ = institutional()
     daily, types, evaluation = predictive()
-    years = (occ["hour"].max() - occ["hour"].min()).days / 365.25 if occ is not None and len(occ) else None
+    summary, years = pd.DataFrame(), None
+    if occ is not None and len(occ):
+        start, end = window(as_of)
+        occ = occ[(occ["hour"] >= start) & (occ["hour"] < end)]
+        if len(occ):
+            summary = building_summary(occ, ds)
+            years = (occ["hour"].max() - occ["hour"].min()).days / 365.25
     return build(events, summary, evaluation, daily, types, forecast, ds.calendar,
-                 energy=df, warnings=ds.warnings, occ_years=years)
+                 energy=df, warnings=ds.warnings, occ_years=years, as_of=as_of)
 
 
-def recommendations():
-    return compute("recommendations", _recommendations, "Applying recommendation rules ...")
+def recommendations(as_of=None):
+    """Recommendations for the 12 months ending at `as_of` (default: the selected week)."""
+    as_of = pd.Timestamp(as_of if as_of is not None else selected_week_end()).normalize()
+    return compute(f"recommendations {as_of:%Y-%m-%d}", lambda ds: _recommendations(ds, as_of),
+                   "Applying recommendation rules for the 12 months to this date ...")
 
 
 def week(week_end):

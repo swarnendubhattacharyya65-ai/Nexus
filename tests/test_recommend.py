@@ -65,20 +65,40 @@ assert pb.building_type("Boys dorm") == "residence" and pb.building_type("Hostel
 assert pb.building_type("Lecture Hall") == "academic" and pb.building_type("Mess A") == "dining"
 assert pb.building_type("Facilities") == "plant"
 
-# what's at stake: savings only as the person's scenario; shifting never claims a saving
+# what's at stake: only measured amounts plus "every 10%" arithmetic; shifting never claims a saving
 df = pd.DataFrame([dict(r, kind="Save energy", title="t") for r in recs])
 r6 = df[(df["rule"] == "R6")].iloc[0].to_dict()
-line = stake_line(r6, 0.2, 8.0, None, 1_000_000)
-assert "If a fix cut that by 20%" in line and "₹" in line, line
+line = stake_line(r6, 8.0, None, 1_000_000)
+assert "Every 10% cut here saves" in line and "₹" in line and "20%" not in line, line
+assert f"{r6['at_stake_kwh'] * 0.1:,.0f} kWh" in line, line
 r8 = df[df["rule"] == "R8"].iloc[0].to_dict()
-line = stake_line(r8, 0.2, 8.0, None, 1_000_000)
-assert "does not save energy" in line and "₹" not in line, line
-assert stake_line(dict(r6, worth_kind="", at_stake_kwh=float("nan")), 0.2, None, None, None) == ""
+line = stake_line(r8, 8.0, None, 1_000_000)
+assert "does not save energy" in line and "₹" not in line and "Every" not in line, line
+assert stake_line(dict(r6, worth_kind="", at_stake_kwh=float("nan")), None, None, None) == ""
 
-# the downloadable checklist has a checkbox per step
-md = checklist(df.assign(kind="Save energy"), 0.2, 1_000_000, "Test campus")
-assert md.count("- [ ]") == sum(len(r["actions"]) for r in recs)
-assert "not diagnoses" in md
+# the downloadable checklist has a checkbox per step and says which months it covers
+md = checklist(df.assign(kind="Save energy"), 1_000_000, "Test campus", "the 12 months to 3 Feb 2017")
+assert md.count("- [ ] ") == sum(len(r["actions"]) for r in recs)
+assert "not diagnoses" in md and "3 Feb 2017" in md
+
+# results follow the selected date: a window ending earlier gives different numbers
+early = R.from_energy(e, as_of=pd.Timestamp("2016-06-30"))
+late = R.from_energy(e)
+assert {r["finding"] for r in early} != {r["finding"] for r in late}
+assert all("Jun 2016" in r["evidence"] for r in early if r["rule"] == "R6"), [r["evidence"] for r in early]
+assert not any(r["rule"] == "R9" for r in early), "only 6 months before June 2016: no seasonal rule"
+start, end = R.window(pd.Timestamp("2016-06-30"))
+assert end == pd.Timestamp("2016-07-01") and (end - start).days == 365
+
+# events: only those that started in the 12 months before the date
+ev = pd.DataFrame({"building": ["Main Office"] * 2, "direction": ["high"] * 2, "hours": [5, 5],
+                   "extra_pct": [1.0, 1.0], "extra_kwh": [100.0, 200.0], "actual_kwh": [200.0, 400.0],
+                   "expected_kwh": [100.0, 200.0], "samples": [10, 10],
+                   "start": pd.to_datetime(["2016-03-05 22:00", "2017-01-07 22:00"]),
+                   "end": pd.to_datetime(["2016-03-06 03:00", "2017-01-08 03:00"])})
+cal = pd.DataFrame({"date": pd.date_range("2016-01-01", "2017-02-28"), "working_day": True})
+assert [r["size"] for r in R.from_events(ev, cal, pd.Timestamp("2016-06-30"))] == [100.0]
+assert len(R.from_events(ev, cal)) == 2
 
 # campus total is scaled per building to a full year
 assert abs(R.campus_year_kwh(e) - e[e["hour"] > e["hour"].max() - pd.Timedelta(days=365)]["kwh"].sum()) < 1e4
