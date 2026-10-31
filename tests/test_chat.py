@@ -113,3 +113,29 @@ try:   # a blocked answer is reported, not shown as empty
 except chat.GeminiError as e:
     assert "SAFETY" in str(e)
 print("gemini tests passed")
+
+# ---- savings estimates in the recommendations lookup, and the AI summary request
+recs = pd.DataFrame({"rule": ["R1", "R3", "R8"], "title": ["a", "b", "c"], "building": ["Library"] * 3,
+                     "finding": ["f"] * 3, "next_step": ["s"] * 3,
+                     "at_stake_kwh": [500.0, 10000.0, 3000.0], "at_stake_what": ["w"] * 3,
+                     "worth_kind": ["once", "save", "shift"]})
+c = chat.Context(**{**ctx().__dict__, "recommendations": lambda: recs, "reduction": 0.2, "used": []})
+rows = json.loads(chat.run_tool("recommendations", {}, c))["rows"]
+assert rows[0]["rule"] == "R3" and rows[0]["estimated_saving_kwh"] == 2000.0 and rows[0]["assumed_cut_pct"] == 20
+assert all(r["estimated_saving_kwh"] is None for r in rows[1:]), rows    # one-off and peak shift: no saving
+assert "worth_kind" not in rows[0]
+assert "estimated_saving_kwh" in chat.system_prompt(c) and "assumed_cut_pct" in chat.system_prompt(c)
+assert chat.Context(**{k: v for k, v in ctx().__dict__.items() if k not in ("reduction", "used")}).reduction == 0.10
+
+h = chat.summary_history(ctx())
+assert len(h) == 1 and h[0]["role"] == "user" and "12 Mar 2023" in h[0]["content"]
+assert "Quote every number exactly" in h[0]["content"] and "What to do first" in h[0]["content"]
+seen = []
+summary_tool = NS(type="tool_use", id="t2", name="recommendations", input={})
+script = [FakeStream([summary_tool], "tool_use", []),
+          FakeStream([NS(type="text", text="Electricity rose 4%.")], "end_turn", ["Electricity rose 4%."])]
+c = chat.Context(**{**ctx().__dict__, "recommendations": lambda: recs, "used": []})
+out = "".join(chat.reply(fake_client(script, seen), "m", h, c))
+assert out == "Electricity rose 4%." and c.used == ["recommendations"]
+assert seen[0]["messages"][0]["content"] == h[0]["content"]
+print("summary and savings tests passed")

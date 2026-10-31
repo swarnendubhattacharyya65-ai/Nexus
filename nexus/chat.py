@@ -12,6 +12,8 @@ from typing import Callable
 
 import pandas as pd
 
+from nexus.recommend import DEFAULT_REDUCTION, estimated_saving
+
 DEFAULT_MODEL = "claude-sonnet-5-5"
 MAX_TOKENS = 1500
 MAX_ROUNDS = 6            # lookups the model may chain for one question
@@ -32,6 +34,9 @@ the numbers and let the person compute.
 investigations only.
 - Money or CO2 only if convert_kwh says the person has entered a tariff or factor; otherwise \
 say they can add one in Settings.
+- Savings: quote only estimated_saving_kwh from the recommendations tool, and always say it \
+assumes the cut in assumed_cut_pct, which the person set. It is an estimate, not a prediction. \
+Amounts of different recommendations overlap, so never add them up.
 - Say where the data comes from when it matters: {source}
 - Forecasts are statistical patterns from past data with no weather input, starting the day \
 after the data ends; say so when you quote one.
@@ -67,7 +72,9 @@ TOOLS = [
      "how accurate the method was in testing.", "input_schema": {
          "type": "object", "properties": {"building": {"type": "string"}}}},
     {"name": "recommendations", "description": "NEXUS's rule-based suggested checks, each with "
-     "the finding that triggered it and a next step.", "input_schema": {"type": "object", "properties": {}}},
+     "the finding that triggered it, a next step, the energy at stake (measured) and, for "
+     "energy-saving checks, the estimated saving at the cut the person assumes.",
+     "input_schema": {"type": "object", "properties": {}}},
     {"name": "convert_kwh", "description": "Convert kWh to rupees and CO2 using the tariff and "
      "carbon factor the person entered in Settings. Returns that they are not set if absent.",
      "input_schema": {"type": "object", "properties": {"kwh": {"type": "number"}}, "required": ["kwh"]}},
@@ -91,6 +98,7 @@ class Context:
     recommendations: Callable[[], pd.DataFrame]
     tariff: float | None = None
     factor: float | None = None
+    reduction: float = DEFAULT_REDUCTION    # the cut the person assumes for savings estimates
     used: list = field(default_factory=list)
 
 
@@ -115,6 +123,18 @@ def _clean(v):
     if isinstance(v, (list, tuple)):
         return [_clean(x) for x in v]
     return str(v)
+
+
+def with_savings(recs, reduction):
+    """Recommendations plus the savings estimate at the person's cut, largest estimate first."""
+    if recs is None or len(recs) == 0 or "at_stake_kwh" not in recs.columns:
+        return recs
+    kinds = recs["worth_kind"] if "worth_kind" in recs.columns else ["save"] * len(recs)
+    out = recs.assign(
+        estimated_saving_kwh=[estimated_saving(k, w, reduction) for k, w in zip(recs["at_stake_kwh"], kinds)],
+        assumed_cut_pct=round(reduction * 100))
+    out = out.sort_values("estimated_saving_kwh", ascending=False, na_position="last", kind="stable")
+    return out.drop(columns=["worth_kind"], errors="ignore")
 
 
 def table(df, limit=MAX_ROWS):
@@ -151,7 +171,7 @@ def run_tool(name, args, ctx):
                 f = f[f["building"] == args["building"]]
             out = table(f)
         elif name == "recommendations":
-            out = table(ctx.recommendations())
+            out = table(with_savings(ctx.recommendations(), ctx.reduction))
         elif name == "convert_kwh":
             kwh = float(args["kwh"])
             out = {"kwh": kwh,
@@ -166,6 +186,29 @@ def run_tool(name, args, ctx):
     except Exception as e:   # a failed lookup is reported, not raised
         out = {"error": f"{type(e).__name__}: {e}"}
     return json.dumps(_clean(out), ensure_ascii=False)
+
+
+# ------------------------------------------------------------------ the plain-language summary
+
+SUMMARY_REQUEST = """Write a plain-language summary of the week ending {week_end} for the person who \
+looks after this campus's buildings. They are not an energy expert.
+
+First look up week_summary, building_week and recommendations, and occupancy_summary if the \
+college has occupancy data. Then write, in Markdown, under 180 words, with no greeting and no \
+closing offer:
+- One or two sentences: how this week's electricity compared with the week before, and anything \
+that makes the comparison less reliable (missing data).
+- **What stood out:** up to three bullets (a building that changed most, unusual events, energy \
+used while buildings were near-empty).
+- **What to do first:** the two or three energy-saving checks with the largest estimated saving, \
+each with its building, first step and estimated saving, saying the cut it assumes. If none has \
+an estimate, give the most important checks instead.
+Quote every number exactly as the tools return it. Do not guess causes."""
+
+
+def summary_history(ctx):
+    """The one-message conversation that asks for the week's summary (same tools and rules as chat)."""
+    return [{"role": "user", "content": SUMMARY_REQUEST.format(week_end=f"{ctx.week_end:%d %b %Y}")}]
 
 
 # ------------------------------------------------------------------ the conversation

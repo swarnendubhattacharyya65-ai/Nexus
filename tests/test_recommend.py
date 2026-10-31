@@ -65,19 +65,26 @@ assert pb.building_type("Boys dorm") == "residence" and pb.building_type("Hostel
 assert pb.building_type("Lecture Hall") == "academic" and pb.building_type("Mess A") == "dining"
 assert pb.building_type("Facilities") == "plant"
 
-# what's at stake: only measured amounts plus "every 10%" arithmetic; shifting never claims a saving
+# what's at stake: measured amounts; the savings estimate is that amount x the cut the person sets
+# (default 10%), always labelled; shifting and one-off events never claim a saving
 df = pd.DataFrame([dict(r, kind="Save energy", title="t") for r in recs])
 r6 = df[(df["rule"] == "R6")].iloc[0].to_dict()
 line = stake_line(r6, 8.0, None, 1_000_000)
-assert "Every 10% cut here saves" in line and "₹" in line and "20%" not in line, line
+assert "Estimated savings at a 10% cut (your assumption)" in line and "₹" in line and "20%" not in line, line
 assert f"{r6['at_stake_kwh'] * 0.1:,.0f} kWh" in line, line
+line = stake_line(r6, None, None, 1_000_000, reduction=0.25)
+assert "at a 25% cut" in line and f"{r6['at_stake_kwh'] * 0.25:,.0f} kWh" in line and "₹" not in line, line
 r8 = df[df["rule"] == "R8"].iloc[0].to_dict()
 line = stake_line(r8, 8.0, None, 1_000_000)
-assert "does not save energy" in line and "₹" not in line and "Every" not in line, line
+assert "does not save energy" in line and "₹" not in line and "Estimated" not in line, line
 assert stake_line(dict(r6, worth_kind="", at_stake_kwh=float("nan")), None, None, None) == ""
+assert R.estimated_saving(1000.0, "save", 0.2) == 200.0
+assert R.estimated_saving(1000.0, "shift", 0.2) is None and R.estimated_saving(1000.0, "once", 0.2) is None
+assert R.estimated_saving(float("nan"), "save", 0.2) is None
 
 # the downloadable checklist has a checkbox per step and says which months it covers
-md = checklist(df.assign(kind="Save energy"), 1_000_000, "Test campus", "the 12 months to 3 Feb 2017")
+md = checklist(df.assign(kind="Save energy"), 1_000_000, "Test campus", "the 12 months to 3 Feb 2017", 0.15)
+assert "assume a 15% cut" in md and "at a 15% cut" in md
 assert md.count("- [ ] ") == sum(len(r["actions"]) for r in recs)
 assert "not diagnoses" in md and "3 Feb 2017" in md
 
