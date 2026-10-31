@@ -55,7 +55,7 @@ def _answer(item, week_end, i):
             lambda d: insights.campus_forecast(daily, types, evaluation, week_end))
         return ask.outlook(fc, skipped, change, week_end)
     if key == "save":
-        share = st.session_state.get(f"share_{i}", 20) / 100
+        share = st.session_state.get(f"share_{i}", round(common.reduction() * 100)) / 100
         return ask.savings(summary, share, st.session_state.get("tariff"),
                            st.session_state.get("emission_factor"), common.dataset().has_calendar)
     if key == "underused":
@@ -79,8 +79,9 @@ def quick_answers(week_end):
                                          else f"Why is {item['building']} using more energy?"))
         with st.chat_message("assistant", avatar=":material/hub:"):
             if item["key"] == "save":
-                st.slider("If near-empty use were lower by (%)", 5, 50, 20, 5, key=f"share_{i}",
-                          help="A scenario you choose, not a forecast of savings.")
+                st.slider("If near-empty use were lower by (%)", 5, 50, round(common.reduction() * 100), 5,
+                          key=f"share_{i}", help="A scenario you choose, not a forecast of savings. "
+                          "Starts at the cut set in Settings.")
             a = _answer(item, week_end, i)
             st.markdown(a.text)
             if a.table is not None and not a.table.empty:
@@ -121,7 +122,8 @@ def provider():
     return None
 
 
-def _context(week_end):
+def context(week_end):
+    """What the language model may look up for this college and week (used by chat and the AI summary)."""
     ds = common.dataset()
     df, events = common.load()
     week_end = pd.Timestamp(week_end)
@@ -151,14 +153,30 @@ def _context(week_end):
 
     def recs():
         r = common.recommendations()
-        return r[[c for c in ("rule", "title", "building", "finding", "next_step") if c in r.columns]]
+        keep = ("rule", "title", "building", "finding", "next_step", "at_stake_kwh", "at_stake_what", "worth_kind")
+        return r[[c for c in keep if c in r.columns]]
 
     return chat.Context(
         college=ds.name, source=ds.source, week_end=week_end, first=ds.first, last=ds.last,
         overview=overview, snapshot=snapshot, building_week=lambda: insights.building_week(df, week_end),
         events=lambda: events, summary=lambda: common.institutional()[1], forecasts=forecasts,
         recommendations=recs, tariff=st.session_state.get("tariff"),
-        factor=st.session_state.get("emission_factor"))
+        factor=st.session_state.get("emission_factor"), reduction=common.reduction())
+
+
+def stream(setup, history, ctx):
+    """The model's answer as text chunks, from Gemini or Anthropic, running lookups as it asks."""
+    kind, key, model = setup
+    if kind == "gemini":
+        import requests
+        return chat.reply_gemini(requests.post, key, model, history, ctx)
+    import anthropic
+    client = anthropic.Anthropic(api_key=key, timeout=60, max_retries=1)
+    return chat.reply(client, model, history, ctx)
+
+
+def provider_name(setup):
+    return {"gemini": "Google Gemini", "anthropic": "Claude"}[setup[0]] + f" ({setup[2]})"
 
 
 def _chat_log():
@@ -174,7 +192,6 @@ def conversation(week_end):
             "key as `ANTHROPIC_API_KEY`. Until then, the **Quick answers** tab works without one.",
             icon=":material/key:")
         return
-    kind, key, model = setup
     log = _chat_log()
     asked = sum(m["role"] == "user" for m in log)
     if not log:
@@ -196,19 +213,12 @@ def conversation(week_end):
         st.warning(f"This session has reached {MAX_QUESTIONS} questions. Reload the page to start again.")
         return
     log.append({"role": "user", "content": prompt})
-    ctx = _context(week_end)
+    ctx = context(week_end)
     with thread:
         _bubble("user", prompt)
         with st.chat_message("assistant", avatar=":material/hub:"):
             try:
-                if kind == "gemini":
-                    import requests
-                    stream = chat.reply_gemini(requests.post, key, model, log, ctx)
-                else:
-                    import anthropic
-                    client = anthropic.Anthropic(api_key=key, timeout=60, max_retries=1)
-                    stream = chat.reply(client, model, log, ctx)
-                text = st.write_stream(stream)
+                text = st.write_stream(stream(setup, log, ctx))
             except Exception as e:   # key rejected, no credit, offline ...
                 text = chat.friendly_error(e)
                 st.error(text)

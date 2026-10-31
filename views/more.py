@@ -1,5 +1,6 @@
 """Settings (tariff, carbon factor, thresholds), Reports (downloads) and Help (plain answers)."""
 import html
+import re
 from datetime import datetime
 
 import pandas as pd
@@ -33,6 +34,14 @@ def settings():
                          "Baseline Database (about 0.71 kg/kWh, provisional, for 2024-25). "
                          "Use the factor for the period you are reporting.")
 
+    st.subheader("Savings estimate")
+    st.markdown("Recommendations, Reports and the AI summary estimate savings as the energy each "
+                "problem involves (measured) x the cut you assume here. The cut is your assumption, "
+                "shown next to every estimate.")
+    left, _ = st.columns(2)
+    with left:
+        common.reduction_slider("reduction_settings")
+
     st.subheader("Analysis thresholds")
     st.markdown("These are fixed in the code so every visitor sees the same results. Each page "
                 "explains how it uses them.")
@@ -65,7 +74,47 @@ font-size:13px}th,td{border:1px solid #ddd;padding:5px 8px;text-align:left}th{ba
 .muted{color:#666;font-size:12px}"""
 
 
-def _report_html(ds, snap, week_table, items, recs, week_events, tariff, factor):
+def _savings_table(recs, tariff, cut):
+    """Recommendations for the report, with the energy at stake and the estimate at the chosen cut."""
+    if recs.empty:
+        return recs
+    saved = [recommend.estimated_saving(k, w, cut) for k, w in zip(recs["at_stake_kwh"], recs["worth_kind"])]
+    out = pd.DataFrame({
+        "Check": recs["title"], "Building": recs["building"], "Finding": recs["finding"],
+        "First step": recs["next_step"],
+        "Energy at stake (kWh)": recs["at_stake_kwh"].round(),
+        f"Estimated savings at {cut:.0%} cut (kWh)": [None if v is None else round(v) for v in saved],
+    })
+    if tariff:
+        out[f"Estimated savings (₹ at your ₹{tariff:g}/kWh)"] = [None if v is None else round(v * tariff)
+                                                                 for v in saved]
+    return out
+
+
+def _md_html(text):
+    """The AI summary's simple Markdown (paragraphs, '-' bullets, **bold**, headings) as safe HTML."""
+    out, items = [], []
+    for line in text.splitlines():
+        line = line.strip()
+        bullet = re.match(r"^[-*•]\s+(.*)", line)
+        body = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", html.escape(bullet.group(1) if bullet else line))
+        heading = re.match(r"^#+\s*(.*)", body)
+        if heading:
+            body = f"<b>{heading.group(1)}</b>"
+        if bullet:
+            items.append(f"<li>{body}</li>")
+            continue
+        if items:
+            out.append("<ul>" + "".join(items) + "</ul>")
+            items = []
+        if body:
+            out.append(f"<p>{body}</p>")
+    if items:
+        out.append("<ul>" + "".join(items) + "</ul>")
+    return "".join(out)
+
+
+def _report_html(ds, snap, week_table, items, recs, week_events, tariff, factor, cut, ai=None):
     h = headline(snap)
     e = snap["energy"]
     lines = [f"<li>{html.escape(it['title'])}: {html.escape(it['text'])} <span class='muted'>"
@@ -78,6 +127,11 @@ def _report_html(ds, snap, week_table, items, recs, week_events, tariff, factor)
         if factor:
             bits.append(f"about {e['this'] * factor / 1000:,.1f} t CO₂ at {factor:g} kg/kWh (your factor)")
         money = "<p>Electricity this week, comparable hours: " + "; ".join(bits) + ".</p>"
+    ai_block = ""
+    if ai:
+        ai_block = (f"<h2>AI summary</h2>{_md_html(ai['text'])}<p class='muted'>Written by {html.escape(ai['by'])} "
+                    "from NEXUS's own tables. Check figures against the sections below before sharing.</p>")
+    table = _savings_table(recs, tariff, cut)
     return f"""<!doctype html><html><head><meta charset="utf-8"><title>NEXUS week report</title>
 <style>{CSS}</style></head><body>
 <h1>NEXUS week report: {html.escape(ds.name)}</h1>
@@ -86,12 +140,17 @@ def _report_html(ds, snap, week_table, items, recs, week_events, tariff, factor)
 Every number below is calculated by NEXUS's code from the data; flags are measured differences,
 not diagnosed causes.</p>
 <h2>The week</h2><p><b>{html.escape(h['main'])}</b> {html.escape(' '.join(h['details']))}</p>{money}
+{ai_block}
 <h2>Buildings</h2>{week_table.to_html(index=False, na_rep="-")}
 <h2>Key insights</h2><ul>{''.join(lines) or '<li>Nothing stood out this week.</li>'}</ul>
 <h2>Higher-than-usual events this week</h2>
 {week_events.to_html(index=False) if not week_events.empty else '<p>None.</p>'}
-<h2>Recommendations (first steps)</h2>
-{recs[['title', 'building', 'finding', 'next_step']].rename(columns=str.capitalize).to_html(index=False) if not recs.empty else '<p>None.</p>'}
+<h2>Recommendations (first steps and estimated savings)</h2>
+{table.to_html(index=False, na_rep="-", float_format=lambda v: f"{v:,.0f}") if not table.empty else '<p>None.</p>'}
+<p class="muted">Energy at stake is measured from the data. Estimated savings = energy at stake x a
+{cut:.0%} cut, an assumption set in Settings, not a prediction; only a site check can say what a fix
+really saves. One-off events and peak shifting have no savings estimate. Amounts of different checks
+overlap, so they are not added up.</p>
 <p class="muted">Method: each hour is compared with the median of comparable hours (same hour,
 day type and academic activity, 3 weeks either side); week figures compare the same hours in
 both weeks. See the NEXUS README for details.</p></body></html>"""
@@ -111,10 +170,12 @@ def reports(week_end):
     wk = events[(events["start"] >= start) & (events["start"] < end) & (events["direction"] == "high")]
     week_events = common.events_table(wk)
     tariff, factor = st.session_state.get("tariff"), st.session_state.get("emission_factor")
+    cut = common.reduction()
+    ai = common.ai_summary(week_end)
 
     st.markdown(f"Reports for **{ds.name}**, week ending **{week_end:%a %-d %b %Y}** (change the "
                 "week at the top).")
-    report = _report_html(ds, snap, week_table, items, recs, week_events, tariff, factor)
+    report = _report_html(ds, snap, week_table, items, recs, week_events, tariff, factor, cut, ai)
     c1, c2, c3 = st.columns(3)
     c1.download_button("Week report (HTML)", report, f"nexus-week-{week_end:%Y-%m-%d}.html",
                        "text/html", icon=":material/description:", type="primary",
@@ -135,6 +196,9 @@ def reports(week_end):
         st.caption("The report adds rupees and CO₂ using the figures from Settings, labelled as yours.")
     else:
         st.caption("Add a tariff or carbon factor in Settings to include rupees or CO₂ in the report.")
+    st.caption(f"Savings estimates in the report assume a {cut:.0%} cut (change it in Settings). "
+               + ("The AI summary from Overview is included." if ai else
+                  "Write an AI summary on Overview to include it in the report."))
 
 
 # ------------------------------------------------------------------ help
@@ -177,7 +241,8 @@ HELP = [
      "building is placed on the map only when its name matches exactly one outline; the rest are "
      "listed as not placed."),
     ("What does the conversation send to the AI?",
-     "Your questions, and the NEXUS numbers the assistant looks up to answer them (for example a "
+     "Your questions (and the request for the Overview's AI summary), and the NEXUS numbers the "
+     "assistant looks up to answer them (for example a "
      "week's building table), go to the language-model provider whose key is set (Google Gemini or Anthropic). On "
      "Gemini's free tier, Google may use prompts to improve its products. The raw data files "
      "are never sent. Without an "
@@ -186,6 +251,17 @@ HELP = [
      "It is sent to the NEXUS server and kept in its memory for your session only. It is not "
      "written to disk or shown to other visitors, and it is cleared when you reload or close "
      "the page."),
+    ("How are savings estimated?",
+     "NEXUS measures the energy each problem involves, for example a year of energy used while a "
+     "building is near-empty. The estimated saving is that energy x a cut you assume (10% unless you "
+     "change it in Settings or on Recommendations), and every estimate says which cut it assumes. It is "
+     "not a prediction: only a site check can say what a fix really saves. One-off events and peak "
+     "shifting get no estimate, and the amounts of different checks overlap, so they are not added up."),
+    ("What is the AI summary?",
+     "On Overview, Write summary asks the language model (Gemini or Claude, whichever key is set) for a "
+     "plain-language summary of the chosen week. It looks up the same tables as Ask NEXUS, must quote "
+     "their numbers exactly and does not guess causes. It is labelled as AI-written and is added to the "
+     "week report. Without an API key, the rule-based headline and insights still work."),
     ("Why no rupees by default?",
      "The data has no tariff. Add yours in Settings and Ask NEXUS and Reports show rupees next "
      "to the kWh, labelled as your figure."),

@@ -2,8 +2,9 @@
 
 Campus energy intelligence from the data an institution already generates: meter readings,
 Wi-Fi occupancy and the academic calendar. NEXUS finds unusual use, shows when buildings run
-empty, forecasts the next two weeks, and turns what it finds into solution plans, with the
-numbers behind every result.
+empty, forecasts the next two weeks, turns what it finds into solution plans with estimated
+savings, and writes a plain-language summary of each week with AI, with the numbers behind
+every result.
 
 > **Demo data:** public electricity and Wi-Fi occupancy data from IIIT-Delhi, New Delhi
 > (I-BLEND, 2013-2017). **This is not PES data.** PES integration would be a separate,
@@ -15,6 +16,17 @@ visit can take a minute to wake up).
 This is **NEXUS v2**, on the `main` branch. The first version is kept on the
 [`v1`](https://github.com/swarnendubhattacharyya65-ai/Nexus/tree/v1) branch.
 
+## Latest changes
+- **AI summary of the week.** On Overview, *Write summary* asks the language model (Gemini or
+  Claude, the same key as Ask NEXUS) for a plain-language summary of the chosen week: how it
+  compared with the week before, what stood out, and the checks to do first with their estimated
+  savings. It looks up NEXUS's own tables, must quote their numbers exactly and does not guess
+  causes. It is labelled as AI-written and is added to the week report. Up to 10 per session.
+- **Estimated savings at a cut you choose.** Every energy-saving recommendation now shows an
+  estimated saving: the energy at stake (measured) x the cut you assume (10% unless you change
+  it on Recommendations or in Settings), in rupees too once you enter a tariff. The cut is
+  always shown next to the estimate. The week report and Ask NEXUS use the same estimates.
+
 ## What's new in v2
 - **Recommendations rebuilt as solution plans.** Nine rules (up from five) find unusual use,
   data faults, high use in near-empty buildings, large always-on loads, buildings running on
@@ -25,9 +37,9 @@ This is **NEXUS v2**, on the `main` branch. The first version is kept on the
   downloads as a checklist.
 - **Everything follows the date you pick.** Recommendations look at the 12 months ending on
   the Week ending date, so you can step back through the years.
-- **No guessed savings.** NEXUS shows the energy each problem involves, as measured, and what
-  every 10% of it is worth (in rupees too, once you enter a tariff). It never claims how much
-  a fix will save.
+- **Savings are estimates, never predictions.** NEXUS shows the energy each problem involves, as
+  measured, and the saving at a cut you choose (in rupees too, once you enter a tariff). It never
+  claims which cut a fix will achieve.
 - **Find any college by name.** Type a college in the College box: NEXUS searches open research
   repositories (Zenodo, Figshare, Harvard Dataverse) for its energy data and analyses what it
   can read, or says "College data unavailable". The map moves to that campus either way.
@@ -49,17 +61,17 @@ This is **NEXUS v2**, on the `main` branch. The first version is kept on the
 ## What each page does
 | Page | Question it answers | How |
 |---|---|---|
-| Overview | How did the chosen week compare with the week before? What's happening, what's next, what to do first | Hour-for-hour week comparison, insights feed, 30-day trend, 2-week outlook |
+| Overview | How did the chosen week compare with the week before? What's happening, what's next, what to do first | Hour-for-hour week comparison, AI summary of the week (optional), insights feed, 30-day trend, 2-week outlook |
 | Resource Intelligence | Which hours used unusually more or less energy than normal? | Each hour vs a baseline of comparable hours |
 | Institutional Intelligence | When are buildings busy or near-empty, and do they still use energy when near-empty? | Wi-Fi occupancy estimates by hour and weekday |
 | Predictive Intelligence | How much energy will each building use over the 14 days after the data ends? | Two simple forecasts, tested on history |
-| Recommendations | What should we do, and what is at stake? | Nine explicit rules on the 12 months to the chosen date, each with a solution plan |
+| Recommendations | What should we do, what is at stake, and what could it save? | Nine explicit rules on the 12 months to the chosen date, each with a solution plan and, for energy-saving checks, the estimated saving at your chosen cut |
 | Campus Map | Where on campus is something happening this week? | 3D building outlines coloured by the week's findings, with a replay |
 | Reports | Can I share this week's findings? | Printable week report (HTML) and CSV downloads |
 | Ask NEXUS | Any question, in a continuing conversation | Gemini or Claude with lookup tools over NEXUS's tables; Quick answers without AI |
 | College box (top of every page) | Does this college publish energy data? | Searches public repositories; otherwise "College data unavailable" |
 | Add college data | I have the college's own file | Upload a CSV (or load the public sample); every page then runs on it |
-| Settings, Help | Tariff and carbon factor; plain answers | Your figures, shown next to every result they produce |
+| Settings, Help | Tariff, carbon factor and the cut assumed for savings estimates; plain answers | Your figures, shown next to every result they produce |
 | Data & method | Where the data comes from and every cleaning decision | Shows `DATA.md`, or the import checks for an uploaded college |
 
 Every number is calculated by the code in `nexus/`, not typed in. Where there is not enough
@@ -85,6 +97,10 @@ tariff in Settings, labelled as yours.
 - **Energy at stake** is measured from the data (per year, scaled up where readings are
   missing). The campus peak is energy to *shift*, not save. Amounts of different rules overlap,
   so they are not added up.
+- **Estimated savings** = energy at stake x the cut you assume (default 10%, from 5% to 50%,
+  `DEFAULT_REDUCTION` in `nexus/recommend.py`). Only energy-saving rules (R3, R6, R7, R9) get
+  one: a one-off unusual event (R1) is not a recurring saving, and the campus peak (R8) is
+  shifted, not saved. The cut is your assumption; only a site check can say what a fix saves.
 - **Causes and actions** come from general building-energy practice in `nexus/playbook.py`,
   adapted to the building's type, which is guessed from its name (dorm/hostel → residence,
   dining/mess → dining hall, facilities/plant → plant). The 24 °C AC setting cites India's
@@ -124,14 +140,15 @@ Settings → Secrets). Never put a key in GitHub.
 - **Anthropic:** `ANTHROPIC_API_KEY = "sk-ant-..."` (optionally `ANTHROPIC_MODEL`). Paid.
 - If both are set, Gemini is used.
 
-A public link lets anyone use your quota, so the app stops after 30 questions per session.
-Without a key the Quick answers tab still works.
+The same key writes the **AI summary** on Overview. A public link lets anyone use your quota, so
+the app stops after 30 questions and 10 summaries per session. Without a key the Quick answers
+tab, the rule-based headline and the insights feed still work.
 
 ### Tests and command-line checks
 ```bash
 python tests/test_recommend.py   # recommendation rules, playbooks, date windows
 python tests/test_finder.py      # college search and map lookup (offline, fake responses)
-python tests/test_chat.py        # chatbot tool loop (offline)
+python tests/test_chat.py        # chatbot tool loop, AI summary request, savings lookup (offline)
 python -m nexus.data --check     # rebuild data/processed/ and print every data check
 
 python -m nexus.resource         # baselines and unusual events
@@ -166,7 +183,7 @@ nexus/playbook.py        Solution plans: causes to rule out, staged actions with
 nexus/kpis.py            Week-on-week cards and the Overview headline
 nexus/insights.py        Overview panels: insights feed, 30-day trend, building hours, 2-week outlook
 nexus/ask.py             Quick answers: question routing and rule-based answers
-nexus/chat.py            Chatbot: Gemini or Claude plus lookup tools over NEXUS's tables
+nexus/chat.py            Chatbot and AI summary: Gemini or Claude plus lookup tools over NEXUS's tables
 nexus/finder.py          College search: vetted list, Zenodo, Figshare, Harvard Dataverse
 nexus/place.py           College on the map: OpenStreetMap lookup and building outlines
 nexus/dataset.py         One college's data; nexus/importer.py turns an uploaded CSV into one
@@ -199,6 +216,9 @@ All thresholds are named constants at the top of each file in `nexus/`.
   hour, counting only building-hours recorded in both weeks. Fewer than 50% comparable hours
   gives "Insufficient data".
 - **Recommendations:** see [Recommendations in detail](#recommendations-in-detail).
+- **AI summary:** one fixed request (`SUMMARY_REQUEST` in `nexus/chat.py`) through the same
+  tool loop as Ask NEXUS. The model reads only NEXUS's tables (week summary, buildings,
+  recommendations with estimated savings, occupancy), never the raw data.
 
 ## Other colleges
 **Add college data** takes one CSV of meter readings (`timestamp`, `building`, and one of `kwh`,

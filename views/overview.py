@@ -5,10 +5,10 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
-from nexus import insights
+from nexus import chat, insights
 from nexus.kpis import HOURS_PER_WEEK, headline, window
 from nexus.recommend import EXTREME, PLAN_CHANGE
-from views import campus_map, common
+from views import ask as ask_view, campus_map, common
 from views.common import ACTUAL as BLUE, FORECAST as FORECAST_C, UNUSUAL
 
 
@@ -93,6 +93,50 @@ def _cards(snap, ds):
                   help="Share of building-hours this week with no energy reading (analysed buildings, counted "
                        "only while each meter was in service). Gaps hide "
                        "real use, so a rising share is a meter or data-feed problem to check.")
+
+MAX_SUMMARIES = 10   # AI summaries per session, so a public link cannot use up the API quota
+
+
+def _ai_summary(week_end):
+    """A plain-language summary of the week, written by the language model from NEXUS's own tables."""
+    setup = ask_view.provider()
+    saved = common.ai_summary(week_end)
+    with st.container(border=True, key="ai_summary"):
+        title, action = st.columns([4, 1], vertical_alignment="center")
+        title.markdown("**:material/auto_awesome: AI summary of the week**")
+        if not setup:
+            st.caption("Add a free Gemini key to the app's secrets as `GEMINI_API_KEY` (or an Anthropic key "
+                       "as `ANTHROPIC_API_KEY`) to get a plain-language summary of each week, written by AI "
+                       "from NEXUS's own numbers. The headline above is written by fixed rules.")
+            return
+        count = st.session_state.get("ai_summary_count", 0)
+        clicked = action.button("Rewrite" if saved else "Write summary", icon=":material/auto_awesome:",
+                                type="secondary" if saved else "primary", key="ai_summary_button",
+                                disabled=count >= MAX_SUMMARIES, width="stretch",
+                                help=f"Up to {MAX_SUMMARIES} summaries per session." if count < MAX_SUMMARIES
+                                else f"This session has written {MAX_SUMMARIES} summaries. Reload to start again.")
+        if clicked:
+            st.session_state["ai_summary_count"] = count + 1
+            ctx = ask_view.context(week_end)
+            try:
+                text = st.write_stream(ask_view.stream(setup, chat.summary_history(ctx), ctx))
+            except Exception as e:   # key rejected, quota used up, offline ...
+                st.error(chat.friendly_error(e))
+                return
+            text = text if isinstance(text, str) else "".join(map(str, text))
+            common.save_ai_summary(week_end, text, ask_view.provider_name(setup), ctx.used)
+            st.rerun()      # show it with its caption and a Rewrite button
+        elif saved:
+            st.markdown(saved["text"])
+        if saved:
+            looked = ", ".join(dict.fromkeys(saved["used"])).replace("_", " ") or "nothing"
+            st.caption(f"Written by {saved['by']} from NEXUS's own tables (looked up: {looked}). Estimated "
+                       f"savings assume a {common.reduction():.0%} cut, set in Settings. Check figures on the "
+                       "other pages before sharing. Also added to the week report in Reports.")
+        else:
+            st.caption("What changed this week, what stood out and what to do first, in plain words. Written "
+                       "by AI from the same numbers as the other pages; it quotes them and does not guess causes.")
+
 
 ICONS = {"high": "warning", "data": "power_off", "plan": "trending_up", "pattern": "schedule",
          "caution": "info"}   # Material Symbols names (the font Streamlit already loads)
@@ -246,6 +290,7 @@ def show(df, events, snap):
         st.warning(f"**{building} energy is not analysed.** {why}")
 
     week_end = snap["week_end"]
+    _ai_summary(week_end)
     daily, types, _ = common.predictive()
     fc, skipped, change = common.compute(
         f"campus forecast {week_end:%Y-%m-%d}",

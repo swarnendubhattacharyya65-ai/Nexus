@@ -10,7 +10,7 @@ from nexus.dataset import IIITD, iiitd
 from nexus.institutional import building_summary, load_occupancy
 from nexus.kpis import default_week_end, snapshot
 from nexus.predictive import backtest, daily_energy, day_types, evaluate, extend_types, forecast
-from nexus.recommend import build, window
+from nexus.recommend import DEFAULT_REDUCTION, REDUCTION_CHOICES, build, window
 from nexus.resource import add_baseline, find_events, load_energy
 
 # Chart colours, stepped for the navy page (validated: contrast >= 3:1, colour-blind safe pair).
@@ -42,6 +42,44 @@ def is_unavailable():
 def college():
     name = st.session_state.get("college", IIITD)
     return name if name in colleges() else IIITD
+
+
+# ------------------------------------------------------------- the savings assumption
+
+def reduction():
+    """The cut the person assumes for savings estimates, as a share (0.10 = 10%)."""
+    return st.session_state.get("reduction", DEFAULT_REDUCTION)
+
+
+def _store_reduction(widget_key):
+    st.session_state["reduction"] = st.session_state[widget_key] / 100
+
+
+def _ai_key(week_end):
+    """An AI summary belongs to one college, week, assumed cut and tariff (its figures depend on them)."""
+    return (college(), f"{pd.Timestamp(week_end):%Y-%m-%d}", round(reduction(), 4),
+            st.session_state.get("tariff"))
+
+
+def ai_summary(week_end):
+    """The AI summary written for this week in this session, as {text, by, used}, or None."""
+    return st.session_state.get("ai_summaries", {}).get(_ai_key(week_end))
+
+
+def save_ai_summary(week_end, text, by, used):
+    st.session_state.setdefault("ai_summaries", {})[_ai_key(week_end)] = {"text": text, "by": by,
+                                                                         "used": list(used)}
+
+
+def reduction_slider(widget_key, label="Savings estimate: the cut you assume"):
+    """One slider for the assumed cut. Every page that shows one shares the same setting."""
+    lo, hi, step = REDUCTION_CHOICES
+    st.session_state[widget_key] = round(reduction() * 100)
+    st.slider(f"{label} (%)", lo, hi, step=step, key=widget_key, on_change=_store_reduction,
+              args=(widget_key,), format="%d%%",
+              help="NEXUS measures the energy each problem involves. The estimate is that energy x "
+                   "this cut. It is your assumption, not a prediction: only a site check can say what "
+                   "a fix really saves.")
 
 
 def _code_version():

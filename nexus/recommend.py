@@ -6,7 +6,8 @@ Each recommendation has
   - common causes to rule out, a staged action plan with owners, and how to check it worked
     (from nexus/playbook.py: general practice, never a diagnosis)
 
-Savings are never claimed: the app multiplies "what is at stake" by a reduction the person sets.
+Savings are estimated, never predicted: the estimate is "what is at stake" (measured) multiplied
+by a cut the person chooses (default 10%), and the app always says which cut it assumes.
 
 Print the recommendations:   python -m nexus.recommend
 """
@@ -40,6 +41,8 @@ PEAK_OVER = 0.15           # R8: campus peak hour at least 15% above its 95th-pe
 PEAK_TOP = 0.01            # R8: the top 1% of hours describe when peaks happen
 SEASON_SHARE = 0.15        # R9: the 3 highest months add at least 15% to the year's energy
 SEASON_MIN_MONTHS = 9      # R9: needs 9 different months
+DEFAULT_REDUCTION = 0.10   # savings estimate: the cut assumed until the person picks their own
+REDUCTION_CHOICES = (5, 50, 5)   # the cut the person can pick, in %: from, to, step
 
 RULES = [
     ("R1", "Investigate", "Unusual high use",
@@ -82,6 +85,17 @@ def _rec(rule, building, finding, evidence, size, playbook, at_stake=None, what=
             "at_stake_kwh": float("nan") if at_stake is None else float(at_stake),
             "at_stake_what": what, "worth_kind": worth if at_stake is not None else "",
             "causes": causes, "actions": actions, "verify": verify}
+
+
+def estimated_saving(at_stake_kwh, worth_kind, reduction=DEFAULT_REDUCTION):
+    """Estimated kWh saved if the energy at stake were cut by `reduction` (a share, e.g. 0.10).
+
+    Only for "save" recommendations: a one-off event ("once") is not a recurring saving and
+    peak shifting ("shift") moves energy rather than saving it. None when there is no estimate.
+    """
+    if worth_kind != "save" or at_stake_kwh is None or pd.isna(at_stake_kwh) or not reduction:
+        return None
+    return float(at_stake_kwh) * float(reduction)
 
 
 def _out_of_hours_share(start, end, working):
